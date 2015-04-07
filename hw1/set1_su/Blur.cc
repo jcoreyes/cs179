@@ -179,7 +179,7 @@ int large_gauss_test(int argc, char **argv){
     TODO: Allocate memory on the GPU here. Note that the audio data
     comes in as floating-point values, the number of which is stored in N.
     */
-
+    cudaMalloc((void **)&dev_input_data, N * sizeof(float));	
 
 
     float *dev_blur_v;
@@ -195,6 +195,9 @@ int large_gauss_test(int argc, char **argv){
     Copy the impulse response from host memory to the GPU. 
     */
 
+    cudaMalloc((void **)&dev_blur_v, N * sizeof(float));	
+    cudaMemcpy(dev_blur_v, all_chanel_input, size*sizeof(float) cudaMemcpyHostToDevice);
+	
     float *dev_out_data;
     /* TODO: Allocate memory on the GPU here to store the output 
     audio signal. */
