@@ -18,14 +18,17 @@ cudaBlurKernel(const float *raw_data, const float *blur_v, float *out_data,
     It may be helpful to use the information in the lecture slides, 
     as well as the CPU implementation, as a reference. */
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < blur_v_size || i >= N) {
+    if (i >= N) {
         return;
     }
-
+//	out_data[i] = raw_data[i];
+//	return;
+	out_data[i] = 0;
     for (int j = 0; j < blur_v_size; j++){
+        if (j > i)
+            return;
         out_data[i] += raw_data[i - j] * blur_v[j]; 
     }
-            
 
 }
 
