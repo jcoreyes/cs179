@@ -20,7 +20,7 @@ using std::endl;
 
 const float PI = 3.14159265358979;
 
-#define AUDIO_ON 0
+#define AUDIO_ON 1
 
 #if AUDIO_ON
     #include <sndfile.h>
@@ -176,7 +176,7 @@ int large_gauss_test(int argc, char **argv){
     /* As we iterate through the audio channels (or trials), we'll
     store that channel's data on the GPU here.
 
-    TODO: Allocate memory on the GPU here. Note that the audio data
+    Allocate memory on the GPU here. Note that the audio data
     comes in as floating-point values, the number of which is stored in N.
     */
     cudaMalloc((void **)&dev_input_data, N * sizeof(float));	
@@ -188,9 +188,9 @@ int large_gauss_test(int argc, char **argv){
     often-used quantities in special GPU memory regions. But for now, 
     global memory will do.)
 
-    TODO: Allocate memory on the GPU here. Size parameters can be found above.
+    Allocate memory on the GPU here.
 
-    TODO: Since our impulse response will stay the same for all of
+    Since our impulse response will stay the same for all of
     the audio channels, we can copy over this data now as well.
     Copy the impulse response from host memory to the GPU. 
     */
@@ -199,7 +199,7 @@ int large_gauss_test(int argc, char **argv){
     cudaMemcpy(dev_blur_v, blur_v, GAUSSIAN_SIZE*sizeof(float), cudaMemcpyHostToDevice);
 	
     float *dev_out_data;
-    /* TODO: Allocate memory on the GPU here to store the output 
+    /* Allocate memory on the GPU here to store the output 
     audio signal. */
     cudaMalloc((void **)&dev_out_data, N * sizeof(float));    
 
@@ -285,7 +285,7 @@ int large_gauss_test(int argc, char **argv){
         cudaEventRecord(start_gpu);
 
 
-        /* TODO: Copy this channel's input data (stored in input_data)
+        /* Copy this channel's input data (stored in input_data)
         from host memory to the GPU. */
         cudaMemcpy(dev_input_data, input_data, N*sizeof(float), cudaMemcpyHostToDevice);
 
@@ -304,7 +304,7 @@ int large_gauss_test(int argc, char **argv){
                 cerr << "No kernel error detected" << endl;
         }
 
-        /* TODO: Now that kernel calls have finished, copy the output
+        /*Now that kernel calls have finished, copy the output
         signal back from the GPU to host memory. (We store this channel's
         result in output_data on the host.) */
         cudaMemcpy(output_data, dev_out_data, N*sizeof(float), cudaMemcpyDeviceToHost);
@@ -327,7 +327,7 @@ int large_gauss_test(int argc, char **argv){
             } else {
                 success = false;
                 cerr << "Incorrect output at index " << i << ": " << output_data_host[i] << ", " 
-                    << output_data[i] << ", " << input_data[i] << endl;
+                    << output_data[i] << endl;
             }
         }
 
@@ -357,7 +357,7 @@ int large_gauss_test(int argc, char **argv){
     }
 
 
-    /* TODO: Now that all channels have been processed,
+    /* Now that all channels have been processed,
     free all allocated memory on the GPU. */
     cudaFree(dev_out_data);
     cudaFree(dev_input_data);
