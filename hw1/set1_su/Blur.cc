@@ -20,7 +20,7 @@ using std::endl;
 
 const float PI = 3.14159265358979;
 
-#define AUDIO_ON 1
+#define AUDIO_ON 0
 
 #if AUDIO_ON
     #include <sndfile.h>
@@ -155,7 +155,7 @@ int large_gauss_test(int argc, char **argv){
     parameter to control how many trials we run. */
 
     int nChannels = 1;      // Can set as the number of trials
-    int N = 1e7;        // Can set how many data points arbitrarily
+    int N = 1e5;        // Can set how many data points arbitrarily
 #endif
 
 
@@ -307,7 +307,7 @@ int large_gauss_test(int argc, char **argv){
         /* TODO: Now that kernel calls have finished, copy the output
         signal back from the GPU to host memory. (We store this channel's
         result in output_data on the host.) */
-        cudaMemcpy(dev_out_data, output_data, N*sizeof(float), cudaMemcpyDeviceToHost)
+        cudaMemcpy(output_data, dev_out_data, N*sizeof(float), cudaMemcpyDeviceToHost);
 
         // Stop timer
         cudaEventRecord(stop_gpu);
@@ -327,7 +327,7 @@ int large_gauss_test(int argc, char **argv){
             } else {
                 success = false;
                 cerr << "Incorrect output at index " << i << ": " << output_data_host[i] << ", " 
-                    << output_data[i] << endl;
+                    << output_data[i] << ", " << input_data[i] << endl;
             }
         }
 
