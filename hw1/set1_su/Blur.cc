@@ -155,7 +155,7 @@ int large_gauss_test(int argc, char **argv){
     parameter to control how many trials we run. */
 
     int nChannels = 1;      // Can set as the number of trials
-    int N = 500;        // Can set how many data points arbitrarily
+    int N = 1E7;        // Can set how many data points arbitrarily
 #endif
 
 
@@ -274,7 +274,7 @@ int large_gauss_test(int argc, char **argv){
         const unsigned int local_size = atoi(argv[1]);
         const unsigned int max_blocks = atoi(argv[2]);
         const unsigned int blocks = std::min( max_blocks, 
-            (unsigned int) ceil(N/local_size) );
+            (unsigned int) ceil(N/(float)local_size) );
 
 
 
