@@ -62,28 +62,27 @@ void shmemTransposeKernel(const float *input, float *output, int n) {
   // Shared memory will store a 64x64 submatrix and be padded by a column at
   // the end since we will be accessing the shared memory stride 65 to avoid
   // memory bank conflicts
-  __shared__ float data[64*64];
+  __shared__ float data[65*64];
 
-  int i = threadIdx.x + 64 * blockIdx.x;
+  const int i = threadIdx.x + 64 * blockIdx.x;
   int j = 4 * threadIdx.y + 64 * blockIdx.y;
-  int i_t = threadIdx.x + 64 * blockIdx.y;
+  const int end_j = j + 4;
+
+  const int i_t = threadIdx.x + 64 * blockIdx.y;
   int j_t = 4 * threadIdx.y + 64 * blockIdx.x;
-  int end_j_t = j_t + 4;
-  int end_j = j + 4;
-  // Load in input to shared memory
-  const int k = threadIdx.x;
-  int l = 4 * threadIdx.y;
+  const int end_j_t = j_t + 4;
+
+  const int i_data = threadIdx.x;
+  int j_data = 4 * threadIdx.y;
   for (; j < end_j; j++) {
-    data[l + 64*k] = input[i + n * j];
-    l++;
+    data[j_data + 65*i_data] = input[i + n * j];
+    j_data++;
   }
   __syncthreads();
-  l -= 4;
-  //__syncthreads();
-  // Move data from shared memory to output
+  j_data -= 4;
   for (; j_t < end_j_t; j_t++) {
-    output[i_t + n * j_t] = data[k + 64 * l];
-    l++;
+    output[i_t + n * j_t] = data[i_data + 65 * j_data];
+    j_data++;
   }
 
 }
