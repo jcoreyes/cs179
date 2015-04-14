@@ -61,7 +61,7 @@ void shmemTransposeKernel(const float *input, float *output, int n) {
 
   // Shared memory will store a 64x64 submatrix and be padded by a column at
   // the end since we will be accessing the shared memory stride 65
-  __shared__ float data[64*65];
+  __shared__ float data[64*64];
 
   const int i = threadIdx.x + 64 * blockIdx.x;
   int j = 4 * threadIdx.y + 64 * blockIdx.y;
@@ -70,12 +70,12 @@ void shmemTransposeKernel(const float *input, float *output, int n) {
   // Load in input to shared memory
   
   for (; j < end_j; j++) {
-    data[i + (n+1) * j] = input[i + n * j];
+    data[i + n * j] = input[i + n * j];
   }
 
   // Move data from shared memory to output
   for (; j < end_j; j++) {
-    output[j + n * i] = data[i + (n+1) * j];
+    output[j + n * i] = data[i + n * j];
   }
 }
 
