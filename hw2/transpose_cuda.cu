@@ -60,23 +60,31 @@ void shmemTransposeKernel(const float *input, float *output, int n) {
   // padding). Again, comment on all sub-optimal accesses.
 
   // Shared memory will store a 64x64 submatrix and be padded by a column at
-  // the end since we will be accessing the shared memory stride 65
-  __shared__ float data[64*64];
+  // the end since we will be accessing the shared memory stride 65 to avoid
+  // memory bank conflicts
+  __shared__ float data[65*64];
 
   const int i = threadIdx.x + 64 * blockIdx.x;
   int j = 4 * threadIdx.y + 64 * blockIdx.y;
   const int end_j = j + 4;
-
   // Load in input to shared memory
-  
+  const int k = threadIdx.x;
+  int l = 4 * threadIdx.y;
   for (; j < end_j; j++) {
-    data[i + n * j] = input[i + n * j];
+    data[l + 65*k] = input[i + n * j];
+    l++;
+    __syncthreads();
   }
-
+  l -= 4;
+  j -= 4;
+  //__syncthreads();
   // Move data from shared memory to output
   for (; j < end_j; j++) {
-    output[j + n * i] = data[i + n * j];
+    output[i + n * j] = data[k + 65 * l];
+    l++;
+    __syncthreads();
   }
+
 }
 
 __global__
