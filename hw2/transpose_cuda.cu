@@ -74,6 +74,7 @@ void shmemTransposeKernel(const float *input, float *output, int n) {
 
   const int i_data = threadIdx.x;
   int j_data = 4 * threadIdx.y;
+
   for (; j < end_j; j++) {
     data[j_data + 65*i_data] = input[i + n * j];
     j_data++;
@@ -91,15 +92,26 @@ __global__
 void optimalTransposeKernel(const float *input, float *output, int n) {
   // TODO: This should be based off of your shmemTransposeKernel.
   // Use any optimization tricks discussed so far to improve performance.
-  // Consider ILP and loop unrolling.
+  __shared__ float data[65*64];
 
   const int i = threadIdx.x + 64 * blockIdx.x;
-  int j = 4 * threadIdx.y + 64 * blockIdx.y;
-  const int end_j = j + 4;
+  const int j = 4 * threadIdx.y + 64 * blockIdx.y;
 
-  for (; j < end_j; j++) {
-    output[j + n * i] = input[i + n * j];
-  }
+
+  const int i_data = threadIdx.x;
+  const int j_data = 4 * threadIdx.y;
+
+  const int i_t = threadIdx.x + 64 * blockIdx.y;
+  const int j_t = 4 * threadIdx.y + 64 * blockIdx.x;
+  data[j_data + 65*i_data] = input[i + n * j];
+  data[j_data + 1 + 65*i_data] = input[i + n * (j+1)];
+  data[j_data + 2 + 65*i_data] = input[i + n * (j+2)];
+  data[j_data + 3 + 65*i_data] = input[i + n * (j+3)];
+  __syncthreads();
+  output[i_t + n * j_t] = data[i_data+ 65 * j_data];
+  output[i_t + n * (j_t+1)] = data[i_data+ 65 * (j_data+1)];
+  output[i_t + n * (j_t+2)] = data[i_data+ 65 * (j_data+2)];
+  output[i_t + n * (j_t+3)] = data[i_data+ 65 * (j_data+3)];
 }
 
 void cudaTranspose(const float *d_input,
