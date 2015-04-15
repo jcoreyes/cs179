@@ -21,11 +21,14 @@ You do not need to consider the number of execution cores on the chip.
 
 Hint: What is the latency of an arithmetic instruction? How many instructions
 can a GK110 begin issuing in 1 clock cycle (assuming no dependencies)?
+
 The latency of an arithmetic instruction is about 10 ns. A GK110 has 4 warp
 schedulers with 2 dispatchers each. It can start instructions in up to 4 warps
 each clock and up to 2 instructions in each warp. So it can start 8 instructions
-in 1 clock cycle assuming no dependencies. It'll take about 10 * 8 = 800 arithmetic
+in 1 clock cycle assuming no dependencies. One arithmetic instruction can be done
+in 10 clocks so it'll take about 10 * 8 = 80 arithmetic
 instructions to hide the latency of a single arithmetic instruction.
+
 
 
 Question 1.2: Thread Divergence (6 points)
@@ -41,11 +44,12 @@ if (idx % 32 < 16) {
 }
 
 Does this code diverge? Why or why not?
-Consecutive thread id's are merged into warps. A warp has 32 threads so in the
-above code the first 16 threads in a warp will perform foo() while the second 
-16 threads do nothing. Then the second 16 threads will perform() bar while the
-first 16 threads do nothing. Thus the code diverges because one part of a warp
-does something while the other part does nothing and vice versa.
+This code does not diverge. In a given warp, threadIdx.y will be the same
+and thread Idx.x will range from 0 to 31. So the idx's of all threads
+in a warp will be 32 apart from each other. So idx mod 32 will evaluate
+to the same number for all threads in a warp. Thus all threads in a warp
+will either perform foo() or all threads will perform bar(). Since no
+threads in a warp are waiting and doing nothing we do not have divergence.
 
 
 (b)
@@ -77,21 +81,26 @@ Consider each of the following access patterns.
 data[threadIdx.x + blockSize.x * threadIdx.y] = 1.0;
 
 Is this write coalesced? How many 128 byte cache lines does this write to?
-This write is coalesced. A float is 4 bytes and this code accesses the array
-consecutively so that a warp will access a consecutive 32 floats = 128 bytes.
-So each warp writes to one 128 byte cache line which is the minimum possible.
-There are 32 warps so this code writes to 32 128 byte cache lines.
+
+This write is coalesced. In a given warp, threadIdx.x will vary from 0 to
+31 so the write will access 32 consecutive floats offset starting from 0.
+A float is 4 bytes 32 floats * 4 bytes = 128 bytes so each warp writes
+to one 128 byte cache line.
 
 
 (b)
 data[threadIdx.y + blockSize.y * threadIdx.x] = 1.0;
 
 Is this write coalesced? How many 128 byte cache lines does this write to?
+
 This write is not coalesced because each warp is not accessing the minimum
 possible 128 byte cache lines. The code does not access the array consecutively.
-Instead each warp will access 32 different 128 byte cache lines since in a warp
+In a given warp, threadIdx.y will be the same and threadIdx.x will vary from 0 to
+31. So we can think of a warp as accessing 32 consecutive rows 1 column per instruction
+if the data array is 2d where each access is 32 floats = 128 bytes away from the previous
+access.
+So each warp will access 32 different 128 byte cache lines since in a warp
 each thread is accessing a float 128 bytes away from each the next closest access.
-There are 32 warps so this code will write to 32*32 = 1024 128 byte cache lines.
 
 (c)
 data[1 + threadIdx.x + blockSize.x * threadIdx.y] = 1.0;
@@ -103,7 +112,6 @@ aligned (so data % 128 == 0), then each warp will access 2 different 128 byte
 cache lines. Instead of one warp accessing 4 byte data from addresss 0 to 124
 the warp will access addresses from 4 to 128. So it must access 2 different
 128 byte cache lines.
-There are 32 warps so this code will write to 32*2 = 64 128 byte cache lines.
 
 Question 1.4: Bank Conflicts and Instruction Dependencies (15 points)
 ---------------------------------------------------------------------
@@ -156,26 +164,25 @@ instruction called a fused multiply add (FMA), so this can be a single
 instruction in your "psuedo-assembly".
 
 Hint: Each line should expand to 5 instructions.
-x0 = lhs[i+32*k];
-y0 = rhs[k+128*j];
-z0 = x0 * y0;
-w0 = output[i+32*j];
-w0 = w0 + z0;
+1. x0 = lhs[i+32*k];
+2. y0 = rhs[k+128*j];
+3. w0 = output[i+32*j];
+4. w0 = w0 + x0 * y0; // FMA
+5. output[i+32*j] = w0
 
-x1 = lhs[i + 32 * (k + 1)];
-y1 = rhs[(k + 1) + 128 * j];
-z1 = x1 * y1;;
-w0 = w0 + z1;
-
-
+6. x1 = lhs[i + 32 * (k + 1)];
+7. y1 = rhs[(k + 1) + 128 * j];
+8. w1 = output[i+32*j];
+9. w1 = w1 + x1 * y1; // FMA
+10. output[i+32*j] = w1;
 
 (c)
 Identify pairs of dependent instructions in your answer to part b.
-The instruction z0 = x0 * y0 depends on the two previous instructions.
-The instruction w0 = w0 + z0 also depends on the two previous instructions.
-The instruction z1 = x1 * y1 depends on the two previous instructions.
-The instruction w0 = w0 + z1 depends on the instruction z1 = x1 * y1 and the
-instruction w0 = w0 + z0.
+Line 4 depends on the previous three lines.
+Line 5 depends on line 4.
+Line 8 depends on line 5. 
+Line 9 depends on the previous three lines.
+Line 10 depends on line 9.
 
 (d)
 Rewrite the code given at the beginning of this problem to minimize instruction
@@ -193,15 +200,16 @@ for (int k = 0; k < 128; k += 2) {
 	b = lhs[i + 32 * (k + 1)] * rhs[(k + 1) + 128 * j];
 	output[i + 32 * j] += a + b
 }
-Now the second line does not depend on the first line. We just have the third line
-depending on the two previous lines but the two previous lines are the more
-computationally intensive lines so we want them to happen in parallel.
+Now (in the for loop) the second line does not depend on the first line. 
+We just have the third line depending on the two previous lines but the 
+two previous lines are the more computationally intensive lines so we want 
+them to happen in parallel.
 
 (e)
 Can you think of any other anything else you can do that might make this code
 run faster?
 If we have enough register then we want to do the loads all at the same time and
-overlap all the data io. So the code might become.
+overlap all the data io. So the code might become:
 int i = threadIdx.x;
 int j = threadIdx.y;
 float a, b, c, d, e, f;
@@ -214,6 +222,7 @@ for (int k = 0; k < 128; k += 2) {
 	b = e * f;
 	output[i + 32 * j] += a + b
 }
+We can also unroll the for loop to avoid instruction dependencies.
 ================================================================================
 
 PART 2 - Matrix transpose optimization (65 points)
@@ -301,3 +310,12 @@ for (int i = 0; i < n; i++) {
 }
 
 ? List at least 2 ways (don't need more than a sentence or two for each way).
+In the first way, the second call to vec_add depends on the first call to
+vec_add so the function calls cannot be paralellized and happen at the same
+time. In the second way, the for loop could be unrolled so there are no
+instruction depenencies.
+
+The first way has more data IO since we have to read from x and y and write
+to a, then read from a and z and write to a so there are 4 reads and 2 writes.
+In the second way we read from x, y, and z and write to a so there are 3 reads
+and 1 write.
