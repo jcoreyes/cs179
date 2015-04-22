@@ -241,15 +241,15 @@ int large_gauss_test(int argc, char **argv){
     cufftComplex *dev_out_data;
 
     /* TODO: Allocate memory for these three arrays on the GPU. 
-
+    
     Note that we need to allocate more memory than on Homework 1,
     due to the padding necessary for the FFT convolution. 
 
     Also, unlike in Homework 1, we don't copy our impulse response
     yet, because this is now given to us per-channel. */
-
-
-
+    cudaMalloc((void **)&dev_input_data, padded_length * sizeof(cufftComplex));
+    cudaMalloc((void **)&dev_impulse_v, padded_length * sizeof(cufftComplex));
+    cudaMalloc((void **)&dev_out_data, padded_length * sizeof(cufftComplex));
 
 
 // (From Eric's code)
@@ -388,7 +388,7 @@ int large_gauss_test(int argc, char **argv){
         Note that input_data only stores
         x[n] as read from the input audio file, and not the padding, 
         so be careful with the size of your memory copy. */
-
+        cudaMemcpy(dev_input_data, input_data, N*sizeof(float), cudaMemcpyHostToDevice);
 
 
 
@@ -400,23 +400,26 @@ int large_gauss_test(int argc, char **argv){
         and not the padding, so again, be careful with the size
         of your memory copy. (It's not the same size as the input_data copy.)
         */
-
+        cudaMemcpy(dev_blur_v, blur_v, impulse_length*sizeof(float), cudaMemcpyHostToDevice);
 
         /* TODO: We're only copying to part of the allocated
         memory regions on the GPU above, and we still need to zero-pad.
         (See Lecture 9 for details on padding.)
         Set the rest of the memory regions to 0 (recommend using cudaMemset).
         */
-
+        cudaMemset(dev_input_data+N, 0, padded_length - N);
+        cudaMemset(dev_blur_v+impulse_length, 0, padded_length-impulse_length);
 
         /* TODO: Create a cuFFT plan for the forward and inverse transforms. 
         (You can use the same plan for both, as is done in the lecture examples.)
         */
-
-
+        cufftHandle plan;
+        int batch = 1; // Number of transforms to run
+        cufftPlan1d(&plan, padded_length, CUFFT_C2C, batch)
         /* TODO: Run the forward DFT on the input signal and the impulse response. 
         (Do these in-place.) */
-
+        cufftExecC2C(plan, dev_input_data, dev_input_data, CUFFT_FORWARD);
+        cufftExecC2C(plan, dev_blur_v, dev_blur_v, CUFFT_FORWARD);
 
 
 
