@@ -446,11 +446,11 @@ int large_gauss_test(int argc, char **argv){
 
         /* TODO: Run the inverse DFT on the output signal. 
         (Do this in-place.) */
-
+        cufftExecC2C(plan, dev_out_data, dev_out_data, CUFFT_INVERSE);
 
 
         /* TODO: Destroy the cuFFT plan. */
-
+        cufftDestroy(plan);
 
         // For testing and timing-control purposes only
         gpuErrchk( cudaMemcpy( output_data_testarr, dev_out_data, padded_length * sizeof(cufftComplex), cudaMemcpyDeviceToHost));

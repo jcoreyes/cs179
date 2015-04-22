@@ -53,6 +53,21 @@ cudaProdScaleKernel(const cufftComplex *raw_data, const cufftComplex *impulse_v,
     resilient to varying numbers of threads.
 
     */
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    // Each thread idx will handle the convolution of a single element
+    // from the input array.
+    cufftComplex a;
+    cufftComplex b;
+    cufftComplex result;
+    while (i < N) {
+        a = raw_data[i]
+        b = impulse_v[i]
+        result.x = (a.x*b.x-a.y*b.y)
+        result.y = a.x*b.y+a.y*b.x
+        out_data[i] = result / padded_length;
+        // Increment thread idx if not enough blocks
+        i += blockDim.x * gridDim.x;
+    }
 }
 
 __global__
