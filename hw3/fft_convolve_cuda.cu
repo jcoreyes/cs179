@@ -31,7 +31,14 @@ __device__ static float atomicMax(float* address, float val)
     return __int_as_float(old);
 }
 
-
+__device__ void warpReduce(volatile float* sdata, int tid) {
+    sdata[tid] = max(sdata[tid], sdata[tid+32]);
+    sdata[tid] = max(sdata[tid], sdata[tid+16]);
+    sdata[tid] = max(sdata[tid], sdata[tid+8]);
+    sdata[tid] = max(sdata[tid], sdata[tid+4]);
+    sdata[tid] = max(sdata[tid], sdata[tid+2]);
+    sdata[tid] = max(sdata[tid], sdata[tid+1]);
+}
 
 __global__
 void
@@ -100,21 +107,23 @@ cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
     extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockDim.x*2) + threadIdx.x;
+    unsigned int i = blockIdx.x * (blockDim.x) + threadIdx.x;
     float a_mag;
     while (i < padded_length) {
     
         cufftComplex a = out_data[i];
-        cufftComplex b = out_data[i+blockDim.x];
+       // cufftComplex b = out_data[i+blockDim.x];
         a_mag = a.x * a.x + a.y * a.y;
-        sdata[tid] = max(a_mag, b.x*b.x + b.y*b.y);
+        sdata[tid] = a_mag; //max(a_mag, b.x*b.x + b.y*b.y);
         __syncthreads();
-        for(unsigned int s=blockDim.x/2; s>0; s>>=1) {
+        for(unsigned int s=blockDim.x/2; s>32; s>>=1) {
             if(tid < s) {
                 sdata[tid] = max(sdata[tid], sdata[tid+s]); 
             }
             __syncthreads();
         }
+        if (tid < 32)
+            warpReduce(sdata, tid);
 
         if (tid == 0) {
             atomicMax(max_abs_val, sqrt(sdata[0]));
@@ -163,7 +172,7 @@ void cudaCallMaximumKernel(const unsigned int blocks,
         
 
     /* TODO 2: Call the max-finding kernel. */
-    cudaMaximumKernel<<<blocks, threadsPerBlock, threadsPerBlock+10000>>>(out_data, max_abs_val, padded_length);
+    cudaMaximumKernel<<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length);
 }
 
 
