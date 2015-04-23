@@ -551,10 +551,10 @@ int large_gauss_test(int argc, char **argv){
 
         /* TODO 2: Allocate memory to store the maximum magnitude found. 
         (You only need enough space for one floating-point number.) */
-
+        cudaMalloc((void **)&dev_max_abs_val, sizeof(float));
         /* TODO 2: Set it to 0 in preparation for running. 
         (Recommend using cudaMemset) */
-
+        cudaMemset(dev_max_abs_val, 0, sizeof(float))
 
         /* NOTE: This is a function in the fft_convolve_cuda.cu file,
         where you'll fill in the kernel call for finding the maximum
@@ -598,10 +598,10 @@ int large_gauss_test(int argc, char **argv){
         /* TODO: Now that kernel calls have finished, copy the output
         signal back from the GPU to host memory. (We store this channel's
         result in output_data on the host.)
-
+        
         Note that we have a padded-length signal, so be careful of the
         size of the memory copy. */
-
+        cudaMemcpy(output_data, dev_out_data, padded_length * sizeof(cufftComplex), cudaMemcpyDeviceToHost);
 
         cout << endl;
         cout << "CPU normalization constant: " << max_abs_val << endl;
