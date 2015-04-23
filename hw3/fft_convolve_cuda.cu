@@ -106,8 +106,8 @@ cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
         cufftComplex a = out_data[i];
         sdata[tid] = a.x * a.x + a.y * a.y;
         __syncthreads();
-        for(unsigned int s=1; s < blockDim.x; s*=2) {
-            if(tid % (2*s) == 0) {
+        for(unsigned int s=blockDim.x/2; s>0; s>>=1) {
+            if(tid < s) {
                 if (sdata[tid+s] > sdata[tid])
                     sdata[tid] = sdata[tid+s]; 
             }
