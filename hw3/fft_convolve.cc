@@ -561,10 +561,10 @@ int large_gauss_test(int argc, char **argv){
         of the output signal. */
         cudaCallMaximumKernel(blocks, local_size, dev_out_data,
             dev_max_abs_val, padded_length);
-	cudaMemcpy(&max_abs_val_fromGPU, 
-            dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost);
-	max_abs_val_fromGPU = (float) (sqrt((double) max_abs_val_fromGPU));
-	cudaMemset(dev_max_abs_val, max_abs_val_fromGPU, sizeof(float));
+        cudaMemcpy(&max_abs_val_fromGPU, 
+            dev_max_abs_val, sizeof(float), cudaMemcpyDeviceToHost);
+        max_abs_val_fromGPU = (float) (sqrt((double) max_abs_val_fromGPU));
+	    //cudaMemset(dev_max_abs_val, max_abs_val_fromGPU, sizeof(float));
         // Check for errors on kernel call
         err = cudaGetLastError();
         if  (cudaSuccess != err){
@@ -593,9 +593,8 @@ int large_gauss_test(int argc, char **argv){
         STOP_RECORD_TIMER(gpu_time_ms_norm);
 
         // For testing purposes only
-        gpuErrchk( cudaMemcpy(&max_abs_val_fromGPU, 
-            dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost)
-	 );
+        // gpuErrchk( cudaMemcpy(&max_abs_val_fromGPU, 
+        //     dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost));
 
 
 
