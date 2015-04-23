@@ -21,7 +21,7 @@ using std::endl;
 
 const float PI = 3.14159265358979;
 
-#define AUDIO_ON 1
+#define AUDIO_ON 0
 
 #if AUDIO_ON
     #include <sndfile.h>
@@ -177,7 +177,7 @@ int large_gauss_test(int argc, char **argv){
     parameter to control how many trials we run. */
 
     int nChannels = 2;      // Can set as the number of trials
-    int N = 1e7;        // Can set how many data points arbitrarily
+    int N = 1e6;        // Can set how many data points arbitrarily
     int impulse_length = GAUSSIAN_SIZE;
 
 #endif
@@ -381,7 +381,8 @@ int large_gauss_test(int argc, char **argv){
         START_TIMER();
 
 
-
+        cudaMemset(dev_input_data, 0, padded_length*sizeof(cufftComplex));
+        cudaMemset(dev_impulse_v, 0, padded_length*sizeof(cufftComplex));
         /* TODO: Copy this channel's input data (stored in input_data)
         from host memory to the GPU. 
 
@@ -407,9 +408,9 @@ int large_gauss_test(int argc, char **argv){
         (See Lecture 9 for details on padding.)
         Set the rest of the memory regions to 0 (recommend using cudaMemset).
         */
-        cudaMemset(dev_input_data+N, 0, padded_length - N);
-        cudaMemset(dev_impulse_v+impulse_length, 0, padded_length-impulse_length);
-
+        //cudaMemset(dev_input_data+N, 0, padded_length - N);
+        //cudaMemset(dev_impulse_v+impulse_length, 0, padded_length-impulse_length);
+        //cudaMemset(dev_out_data, 0, padded_length);
         /* TODO: Create a cuFFT plan for the forward and inverse transforms. 
         (You can use the same plan for both, as is done in the lecture examples.)
         */
