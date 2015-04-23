@@ -97,7 +97,7 @@ cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
         compare-float-in-cuda)
 
     */
-    __shared__ float sdata[blockDim.x];
+    extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -157,7 +157,7 @@ void cudaCallMaximumKernel(const unsigned int blocks,
         
 
     /* TODO 2: Call the max-finding kernel. */
-    cudaMaximumKernel<<<blocks, threadsPerBlock>>>(out_data, max_abs_val, padded_length);
+    cudaMaximumKernel<<<blocks, threadsPerBlock, threadsPerBlock+10000>>>(out_data, max_abs_val, padded_length);
 }
 
 
@@ -168,5 +168,5 @@ void cudaCallDivideKernel(const unsigned int blocks,
         const unsigned int padded_length) {
         
     /* TODO 2: Call the division kernel. */
-    cudaDivideKernel<<<blocks, threadsPerBlock>>>(out_data, max_abs_val, padded_length);
+    //cudaDivideKernel<<<blocks, threadsPerBlock>>>(out_data, max_abs_val, padded_length);
 }

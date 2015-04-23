@@ -554,14 +554,17 @@ int large_gauss_test(int argc, char **argv){
         cudaMalloc((void **)&dev_max_abs_val, sizeof(float));
         /* TODO 2: Set it to 0 in preparation for running. 
         (Recommend using cudaMemset) */
-        cudaMemset(dev_max_abs_val, 0, sizeof(float))
+        cudaMemset(dev_max_abs_val, 0, sizeof(float));
 
         /* NOTE: This is a function in the fft_convolve_cuda.cu file,
         where you'll fill in the kernel call for finding the maximum
         of the output signal. */
         cudaCallMaximumKernel(blocks, local_size, dev_out_data,
             dev_max_abs_val, padded_length);
-
+	cudaMemcpy(&max_abs_val_fromGPU, 
+            dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+	max_abs_val_fromGPU = (float) (sqrt((double) max_abs_val_fromGPU));
+	cudaMemset(dev_max_abs_val, max_abs_val_fromGPU, sizeof(float));
         // Check for errors on kernel call
         err = cudaGetLastError();
         if  (cudaSuccess != err){
@@ -591,7 +594,8 @@ int large_gauss_test(int argc, char **argv){
 
         // For testing purposes only
         gpuErrchk( cudaMemcpy(&max_abs_val_fromGPU, 
-            dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost) );
+            dev_max_abs_val, 1 * sizeof(float), cudaMemcpyDeviceToHost)
+	 );
 
 
 
