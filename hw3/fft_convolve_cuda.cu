@@ -101,19 +101,23 @@ cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
 
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    cufftComplex a = out_data[i];
-    sdata[tid] = a.x * a.x + a.y * a.y;
-    __syncthreads();
-    for(unsigned int s=1; s < blockDim.x; s*=2) {
-        if(tid % (2*s) == 0) {
-            if (sdata[tid+s] > sdata[tid])
-                sdata[tid] = sdata[tid+s]; 
-        }
+    while (i < padded_length) {
+    
+        cufftComplex a = out_data[i];
+        sdata[tid] = a.x * a.x + a.y * a.y;
         __syncthreads();
-    }
+        for(unsigned int s=1; s < blockDim.x; s*=2) {
+            if(tid % (2*s) == 0) {
+                if (sdata[tid+s] > sdata[tid])
+                    sdata[tid] = sdata[tid+s]; 
+            }
+            __syncthreads();
+        }
 
-    if (tid == 0) {
-        atomicMax(max_abs_val, sdata[0]);
+        if (tid == 0) {
+            atomicMax(max_abs_val, sqrt(sdata[0]));
+        }
+        i += blockDim.x * gridDim.x;
     }
 
 }
@@ -132,7 +136,7 @@ cudaDivideKernel(cufftComplex *out_data, float *max_abs_val,
     while(i < padded_length) {
         out_data[i].x /= max_abs_val[0];
         out_data[i].y /= max_abs_val[0];
-        i++;
+        i += blockDim.x * gridDim.x;
     }
 }
 
@@ -157,7 +161,7 @@ void cudaCallMaximumKernel(const unsigned int blocks,
         
 
     /* TODO 2: Call the max-finding kernel. */
-    cudaMaximumKernel<<<blocks, threadsPerBlock, padded_length>>>(out_data, max_abs_val, padded_length);
+    cudaMaximumKernel<<<blocks, threadsPerBlock, threadsPerBlock+10000>>>(out_data, max_abs_val, padded_length);
 }
 
 
@@ -168,5 +172,5 @@ void cudaCallDivideKernel(const unsigned int blocks,
         const unsigned int padded_length) {
         
     /* TODO 2: Call the division kernel. */
-    //cudaDivideKernel<<<blocks, threadsPerBlock>>>(out_data, max_abs_val, padded_length);
+    cudaDivideKernel<<<blocks, threadsPerBlock>>>(out_data, max_abs_val, padded_length);
 }
