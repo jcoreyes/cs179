@@ -108,22 +108,20 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
 
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x *2* (blockDim.x) + tid;
-    while (i+blockDim.x < padded_length) {
+    unsigned int gridSize = blockSize*2*gridDim.x;
+    while (i+blockDim.x < padded_length) { 
+        sdata[tid] = max(sdata[tid],max(out_data[i].x, out_data[i+blockDim.x].x));
+        i += gridSize;
+    }    
+    __syncthreads();
+    if (blockSize >= 512) {if (tid < 256) { sdata[tid] = max(sdata[tid], sdata[tid+256]);} __syncthreads(); } 
+    if (blockSize >= 256) {if (tid < 128) { sdata[tid] = max(sdata[tid], sdata[tid+128]);} __syncthreads(); } 
+    if (blockSize >= 128) {if (tid < 64) { sdata[tid] = max(sdata[tid], sdata[tid+64]);} __syncthreads(); } 
+
+    if (tid < 32) warpReduce<blockSize>(sdata, tid);
+
+    if (tid == 0) atomicMax(max_abs_val, sdata[0]);
     
-        //sdata[tid] = max(a.x*a.x+a.y*a.y,b.x*b.x + b.y*b.y);
-        //sdata[tid] = a.x*a.x+a.y*a.y;
-        sdata[tid] = max(out_data[i].x, out_data[i+blockDim.x].x);
-        
-        __syncthreads();
-        if (blockSize >= 512) {if (tid < 256) { sdata[tid] = max(sdata[tid], sdata[tid+256]);} __syncthreads(); } 
-        if (blockSize >= 256) {if (tid < 128) { sdata[tid] = max(sdata[tid], sdata[tid+128]);} __syncthreads(); } 
-        if (blockSize >= 128) {if (tid < 64) { sdata[tid] = max(sdata[tid], sdata[tid+64]);} __syncthreads(); } 
-
-        if (tid < 32) warpReduce<blockSize>(sdata, tid);
-
-        if (tid == 0) atomicMax(max_abs_val, sdata[0]);
-        i += blockDim.x *2* gridDim.x;
-    }
 
 }
 
