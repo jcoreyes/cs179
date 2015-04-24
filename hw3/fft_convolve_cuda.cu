@@ -116,18 +116,13 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
         a_mag = a.x * a.x + a.y * a.y;
         sdata[tid] = a_mag; //max(a_mag, b.x*b.x + b.y*b.y);
         __syncthreads();
-        for(unsigned int s=blockDim.x/2; s>32; s>>=1) {
-            if(tid < s) {
-                sdata[tid] = max(sdata[tid], sdata[tid+s]); 
-            }
-            __syncthreads();
-        }
-        if (tid < 32)
-            warpReduce<blockSize>(sdata, tid);
+        if (blockSize >= 512) {if (tid < 256) { sdata[tid] = max(sdata[tid], sdata[tid+256]);} __syncthreads(); } 
+        if (blockSize >= 256) {if (tid < 128) { sdata[tid] = max(sdata[tid], sdata[tid+128]);} __syncthreads(); } 
+        if (blockSize >= 128) {if (tid < 64) { sdata[tid] = max(sdata[tid], sdata[tid+64]);} __syncthreads(); } 
 
-        if (tid == 0) {
-            atomicMax(max_abs_val, sqrt(sdata[0]));
-        }
+        if (tid < 32) warpReduce<blockSize>(sdata, tid);
+
+        if (tid == 0) atomicMax(max_abs_val, sqrt(sdata[0]));
         i += blockDim.x * gridDim.x;
     }
 
