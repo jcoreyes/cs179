@@ -107,14 +107,12 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
     extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockDim.x) + threadIdx.x;
-    float a_mag;
+    unsigned int i = blockIdx.x * 2*(blockDim.x) + threadIdx.x;
     while (i < padded_length) {
     
         cufftComplex a = out_data[i];
-       // cufftComplex b = out_data[i+blockDim.x];
-        a_mag = a.x * a.x + a.y * a.y;
-        sdata[tid] = a_mag; //max(a_mag, b.x*b.x + b.y*b.y);
+        cufftComplex b = out_data[i+blockDim.x];
+        sdata[tid] = max(a.x*a.x+a.y*a.y,b.x*b.x + b.y*b.y);
         __syncthreads();
         if (blockSize >= 512) {if (tid < 256) { sdata[tid] = max(sdata[tid], sdata[tid+256]);} __syncthreads(); } 
         if (blockSize >= 256) {if (tid < 128) { sdata[tid] = max(sdata[tid], sdata[tid+128]);} __syncthreads(); } 
@@ -123,7 +121,7 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
         if (tid < 32) warpReduce<blockSize>(sdata, tid);
 
         if (tid == 0) atomicMax(max_abs_val, sqrt(sdata[0]));
-        i += blockDim.x * gridDim.x;
+        i += blockDim.x *2* gridDim.x;
     }
 
 }
