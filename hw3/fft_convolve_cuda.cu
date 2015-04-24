@@ -130,6 +130,9 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
     unsigned int i = blockIdx.x *2* (blockDim.x) + tid; 
     unsigned int gridSize = blockSize*2*gridDim.x;
 
+    // Initialize shared mem to 0
+    sdata[tid] = 0;
+
     // Perform two loads and the first step of the reduction as many times
     // as needed. Optimization 1.
     while (i+blockDim.x < padded_length) { 
