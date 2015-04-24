@@ -141,7 +141,7 @@ __global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
     // Perform two loads and the first step of the reduction as many times
     // as needed. Optimization 1.
     while (i+blockDim.x < padded_length) { 
-        sdata[tid] = max(sdata[tid],max(out_data[i].x, out_data[i+blockDim.x].x));
+        sdata[tid] = max(sdata[tid],max(abs(out_data[i].x), abs(out_data[i+blockDim.x].x)));
         i += gridSize; // Step by gridSize each time to maintain coalescing
     }    
     __syncthreads(); // Sync threads are loading in to shared memory
