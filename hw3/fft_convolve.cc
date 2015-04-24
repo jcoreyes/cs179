@@ -561,10 +561,6 @@ int large_gauss_test(int argc, char **argv){
         of the output signal. */
         cudaCallMaximumKernel(blocks, local_size, dev_out_data,
             dev_max_abs_val, padded_length);
-        //cudaMemcpy(&max_abs_val_fromGPU, 
-        //    dev_max_abs_val, sizeof(float), cudaMemcpyDeviceToHost);
-        //max_abs_val_fromGPU = (float) (sqrt((double) max_abs_val_fromGPU));
-	    //cudaMemset(dev_max_abs_val, max_abs_val_fromGPU, sizeof(float));
         // Check for errors on kernel call
         err = cudaGetLastError();
         if  (cudaSuccess != err){
@@ -605,7 +601,7 @@ int large_gauss_test(int argc, char **argv){
         Note that we have a padded-length signal, so be careful of the
         size of the memory copy. */
         gpuErrchk( cudaMemcpy(output_data, dev_out_data,
-	    padded_length * sizeof(cufftComplex), cudaMemcpyDeviceToHost));
+	       padded_length * sizeof(cufftComplex), cudaMemcpyDeviceToHost));
 
         cout << endl;
         cout << "CPU normalization constant: " << max_abs_val << endl;
