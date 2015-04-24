@@ -31,13 +31,14 @@ __device__ static float atomicMax(float* address, float val)
     return __int_as_float(old);
 }
 
+template <unsigned int blockSize>
 __device__ void warpReduce(volatile float* sdata, int tid) {
-    sdata[tid] = max(sdata[tid], sdata[tid+32]);
-    sdata[tid] = max(sdata[tid], sdata[tid+16]);
-    sdata[tid] = max(sdata[tid], sdata[tid+8]);
-    sdata[tid] = max(sdata[tid], sdata[tid+4]);
-    sdata[tid] = max(sdata[tid], sdata[tid+2]);
-    sdata[tid] = max(sdata[tid], sdata[tid+1]);
+    if (blockSize >= 64) sdata[tid] = max(sdata[tid], sdata[tid+32]);
+    if (blockSize >= 32) sdata[tid] = max(sdata[tid], sdata[tid+16]);
+    if (blockSize >= 16) sdata[tid] = max(sdata[tid], sdata[tid+8]);
+    if (blockSize >= 8) sdata[tid] = max(sdata[tid], sdata[tid+4]);
+    if (blockSize >= 4) sdata[tid] = max(sdata[tid], sdata[tid+2]);
+    if (blockSize >= 2) sdata[tid] = max(sdata[tid], sdata[tid+1]);
 }
 
 __global__
@@ -77,9 +78,8 @@ cudaProdScaleKernel(const cufftComplex *raw_data, const cufftComplex *impulse_v,
     }
 }
 
-__global__
-void
-cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
+template <unsigned int blockSize>
+__global__ void cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
     int padded_length) {
 
     /* TODO 2: Implement the maximum-finding and subsequent
@@ -123,7 +123,7 @@ cudaMaximumKernel(cufftComplex *out_data, float *max_abs_val,
             __syncthreads();
         }
         if (tid < 32)
-            warpReduce(sdata, tid);
+            warpReduce<blockSize>(sdata, tid);
 
         if (tid == 0) {
             atomicMax(max_abs_val, sqrt(sdata[0]));
@@ -172,7 +172,18 @@ void cudaCallMaximumKernel(const unsigned int blocks,
         
 
     /* TODO 2: Call the max-finding kernel. */
-    cudaMaximumKernel<<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length);
+    switch (threadsPerBlock) {
+        case 512: cudaMaximumKernel<512><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 256: cudaMaximumKernel<256><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 128: cudaMaximumKernel<128><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 64: cudaMaximumKernel<64><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 32: cudaMaximumKernel<32><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 16: cudaMaximumKernel<16><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 8: cudaMaximumKernel<8><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 4: cudaMaximumKernel<4><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 2: cudaMaximumKernel<2><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+        case 1: cudaMaximumKernel<1><<<blocks, threadsPerBlock, threadsPerBlock*sizeof(cufftComplex)>>>(out_data, max_abs_val, padded_length); break;
+    }
 }
 
 
