@@ -58,7 +58,7 @@ __global__ void cudaFrequencyScaleKernel(
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
     // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
-    float scalingFactor = 1 - fabsf(1 - 2*(i % sinogram_width)) / sinogram_width;
+    float scalingFactor = 0.5; // - fabsf(1 - 2*(i % sinogram_width)) / sinogram_width;
     while(i < totalSize) {
         dev_sinogram_cmplx[i].x *= scalingFactor;
         dev_sinogram_cmplx[i].y *= scalingFactor;
@@ -77,14 +77,13 @@ void cudaCallFrequencyScaleKernel(
 
 }
 
-__global__ void cudaBackProjection(
-    float *output_dev, 
-    float *dev_sinogram float, 
+__global__ void cudaBackProjection(float *output_dev, 
+    float *dev_sinogram, 
     const int sinogram_width,
     const int nAngles,
     const int width,
     const int height,
-    const float theta_step.
+    const float theta_step,
     const int mid_width,
     const int mid_height,
     const int mid_sinogram_width) {
@@ -93,47 +92,43 @@ __global__ void cudaBackProjection(
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y; // pixel coord
     unsigned int x_geo = x - mid_width;
     unsigned int y_geo = y - mid_height;
-    unsigned int x_i, y_i;
+    float x_i, y_i;
     int d;
-    float theta, m;
-    while(x < width && y < height) {
-        for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
-            // Calculate theta based on angle number
-            theta = thetaNo * theta_step
+    float theta, m, q;
+    for(;x < width; x += blockDim.x * gridDim.x) {
+        for(; y < height; y += blockDim.y * gridDim.y) {
+            for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
+                // Calculate theta based on angle number
+                theta = (float)thetaNo * theta_step;
 
-            if (theta == 0) {
-                d = x_geo;
-            }
-            else if (theta == PI/2) {
-                d = y_geo;
-            }
-            else if (theta == PI) {
-                d = -x_geo;
-            }
-            else if (theta == 3*PI/2) {
-                d = -y_geo;
-            }
-            else {
-                 // Calculate slope from theta
-                m = -1/tanf(theta);
-                q = -1/m;
-                // Handle edge cases
-                x_i = (y_geo - m*x_geo) / (q - m);
-                y_i = q*x_i;
-                d = (int) floorf(sqrtf((float)(x_i*x_i + y_i*y_i)));
+                if (theta == 0) {
+                    d = x_geo;
+                }
+                else if (theta == PI/2) {
+                    d = y_geo;
+                }
+                else if (theta == PI) {
+                    d = -x_geo;
+                }
+                else if (theta == 3*PI/2) {
+                    d = -y_geo;
+                }
+                else {
+                     // Calculate slope from theta
+                    m = -1.0/tanf(theta);
+                    q = -1.0/m;
+                    // Handle edge cases
+                    x_i = (float)(y_geo - m*x_geo) / (q - m);
+                    y_i = q*x_i;
+                    d = (int) floorf(sqrtf((float)(x_i*x_i + y_i*y_i)));
 
-                // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
-                if (x_i < 0 || (q < 0 && x_i > 0))
-                    d = -d;               
+                    // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
+                    if (x_i < 0 || (q < 0 && x_i > 0))
+                        d = -d;               
+                }
+                output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
             }
-
-
-            output_dev[y*width + x] = text2D(texreference, thetaNo, sinogram_mid + d);
-            
         }
-
-        x += blockDim.x * gridDim.x;
-        y += blockDim.y * gridDim.y;
     }
 }
 
@@ -155,7 +150,7 @@ void cudaCallBackProjection(const dim3 blocknum, const dim3 blocksize,
 
 
 int main(int argc, char** argv){
-
+    printf("Starting program\n");
     if (argc != 7){
         fprintf(stderr, "Incorrect number of arguments.\n\n");
         fprintf(stderr, "\nArguments: \n \
@@ -180,10 +175,10 @@ int main(int argc, char** argv){
 
     int sinogram_cmplx_byte_size = (sinogram_width*nAngles*sizeof(cufftComplex));
     int sinogram_byte_size = sinogram_width*nAngles*sizeof(float);
-    float theta_step = 2 * PI / (float) nAngles;
-    int mid_width = (int) floor((float) width / 2);
-    int mid_height = (int) floor((float) height / 2);
-    int mid_sinogram_width = (int) floor((float) sinogram_width/2);
+    float theta_step = 2.0 * PI / (float) nAngles;
+    int mid_width = (int) floor((float) width / 2.0);
+    int mid_height = (int) floor((float) height / 2.0);
+    int mid_sinogram_width = (int) floor((float) sinogram_width/2.0);
     /********** Data storage *********/
 
     // GPU DATA STORAGE
@@ -220,14 +215,14 @@ int main(int argc, char** argv){
     }
 
     int j, i;
-
+    printf("Reading input sinogram file\n");
     for(i = 0; i < nAngles * sinogram_width; i++){
         fscanf(dataFile,"%f",&sinogram_host[i].x);
         sinogram_host[i].y = 0;
     }
 
     fclose(dataFile);
-
+    printf("Finished reading input sinogram file\n");
 
     /*********** Assignment starts here *********/
 
@@ -236,6 +231,7 @@ int main(int argc, char** argv){
     cudaMalloc((void **)&dev_sinogram_cmplx, sinogram_cmplx_byte_size);
     cudaMalloc((void **)&dev_sinogram_float, sinogram_byte_size);
 
+    printf("Copying sinogram from host to device for high pass filter\n");
     gpuErrchk( cudaMemcpy(dev_sinogram_cmplx, sinogram_host, sinogram_cmplx_byte_size,
                  cudaMemcpyHostToDevice));
 
@@ -258,14 +254,17 @@ int main(int argc, char** argv){
     /* Run the forward DFT on the input signal in-place */
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
 
+    printf("Executing frequency scale kernel\n");
     /* Call frequency scaling kernel */
     cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
+    printf("Finished executing scale kernel\n");
 
     /* Create new cuFFT plan for backward transform. */
     cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2R, batch);
     /* Run backward DFT on output signal and extract real part */
     cufftExecC2R(plan, dev_sinogram_cmplx, dev_sinogram_float);
 
+    printf("Copying sinogram data data back to host\n");
     /* Copy data back to host */
     cudaMemcpy( sinogram_float, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
     cudaFree(dev_sinogram_cmplx);
@@ -277,8 +276,8 @@ int main(int argc, char** argv){
         - Copy the reconstructed image back to output_host.
         - Free all remaining memory on the GPU.
     */
-    cudaMalloc((void **)&output_dev, size_result * sizeof(float));
-
+    cudaMalloc((void **)&output_dev, size_result);
+    cudaMemset(output_dev, 0, size_result);
     /* Set up texture memory */
     // Create channel to descibe data type
     channel = cudaCreateChannelDesc<float>();
@@ -287,6 +286,7 @@ int main(int argc, char** argv){
     cudaMemcpyToArray(carray, 0, 0, sinogram_float, sinogram_byte_size, cudaMemcpyHostToDevice);
 
     // Set texture filterm mode property to linear
+    texreference.normalized = 0;
     texreference.filterMode = cudaFilterModeLinear;
     // Set texture address mode to clamp
     texreference.addressMode[0] = cudaAddressModeClamp;
@@ -298,15 +298,16 @@ int main(int argc, char** argv){
     blocknum.x=(int) ceil((float)width/16);
     blocknum.y=(int) ceil((float)height/16);
 
+    printf("Executing back projection kernel\n");
     cudaCallBackProjection(blocknum, blocksize, output_dev, 
-        dev_sinogram_float, sinogram_width, nAngles, width, height,
+        dev_sinogram_float, sinogram_width, nAngles, width, height,theta_step,
         mid_width, mid_height, mid_sinogram_width);
-
+    printf("Finished executing back projection kernel\n");
     //Unbind texture reference to free resource
     cudaUnbindTexture(texreference);
 
     // Copy result matrix from device to host
-    cudaMemcpy( output_host, output_dev, size_result * sizeof(float)), cudaMemcpyDeviceToHost);
+    cudaMemcpy( output_host, output_dev, size_result, cudaMemcpyDeviceToHost);
 
     // Free device memory
     cudaFree(dev_sinogram_float);
