@@ -13,7 +13,6 @@ Adapted by Kevin Yuh (2015)
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <cufft.h>
-
 #define PI 3.14159265358979
 
 /* Check errors on CUDA runtime functions */
@@ -47,6 +46,35 @@ void checkCUDAKernelError()
 
 }
 
+__global__
+void
+cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx, const int sinogram_width,
+    const int nAngles) {
+    const int totalSize = nAngles * sinogram_width;
+
+    /*Divide all data by the value pointed to by max_abs_val. */
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
+    // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
+    float scalingFactor = 1 - fabsf(1 - 2*(i % sinogram_width)) / sinogram_width;
+    while(i < totalSize) {
+        dev_sinogram_cmplx[i].x *= scalingFactor;
+        dev_sinogram_cmplx[i].y *= scalingFactor;
+        i += blockDim.x * gridDim.x;
+    }
+}
+
+
+void cudaCallFrequencyScaleKernel(const unsigned int blocks,
+        const unsigned int threadsPerBlock,
+        cufftComplex *dev_sinogram_cmplx, 
+        const int sinogram_width,
+        const int nAngles) {
+    cudaFrequencyScaleKernel<<<blocks, threadsPerBlock>>>(dev_sinogram_cmplx, sinogram_width, nAngles);
+
+}
+
+
 int main(int argc, char** argv){
 
     if (argc != 7){
@@ -72,7 +100,7 @@ int main(int argc, char** argv){
     int nBlocks = atoi(argv[5]);
 
     // Only need to operate on half of elements of signal array.
-    int sinogram_cmplx_byte_size = (sinogram_width*nAngles*sizeof(cufftComplex);
+    int sinogram_cmplx_byte_size = (sinogram_width*nAngles*sizeof(cufftComplex));
     int sinogram_byte_size = sinogram_width*nAngles*sizeof(float);
     /********** Data storage *********/
 
@@ -119,7 +147,7 @@ int main(int argc, char** argv){
     cudaMalloc((void **)&dev_sinogram_cmplx, sinogram_cmplx_byte_size);
     cudaMalloc((void **)&dev_sinogram_float, sinogram_byte_size);
 
-    gpuErrchk( cudaMemcpy(dev_sinogram_cmplx, sinogram_host, sinogram_cmplx_byte_size),
+    gpuErrchk( cudaMemcpy(dev_sinogram_cmplx, sinogram_host, sinogram_cmplx_byte_size,
                  cudaMemcpyHostToDevice));
 
     /* TODO 1: Implement the high-pass filter:
@@ -139,15 +167,15 @@ int main(int argc, char** argv){
 
     cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2C, batch);
     /* Run the forward DFT on the input signal in-place */
-    gpuErrchk( cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD));
+    cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
 
     /* Call frequency scaling kernel */
-    cudaCallFrequencyScaleKernel(dev_sinogram_cmplx, sinogram_width, nAngles);
+    cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
 
     /* Create new cuFFT plan for backward transform. */
     cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2R, batch);
     /* Run backward DFT on output signal and extract real part */
-    cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_float, CUFFT_INVERSE);
+    cufftExecC2R(plan, dev_sinogram_cmplx, dev_sinogram_float);
 
     cudaFree(dev_sinogram_cmplx);
     /* TODO 2: Implement backprojection.
@@ -180,29 +208,3 @@ int main(int argc, char** argv){
 }
 
 
-void cudaCallFrequencyScaleKernel(const unsigned int blocks,
-        const unsigned int threadsPerBlock,
-        cufftComplex *dev_sinogram_cmplx, 
-        const int sinogram_width,
-        const int nAngles) {
-    cudaFrequencyScaleKernel<<<blocks, threadsPerBlock>>>(dev_sinogram_cmplx, sinogram_width, nAngles);
-
-}
-
-__global__
-void
-cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx, const int sinogram_width,
-    const int nAngles) {
-    const int totalSize = nAngles * sinogram_width;
-
-    /*Divide all data by the value pointed to by max_abs_val. */
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
-    // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
-    float scalingFactor = 1 - abs(1 - 2*(i % sinogram_width) / n;
-    while(i < totalSize) {
-        dev_sinogram_cmplx[i].x *= scalingFactor;
-        dev_sinogram_cmplx[i].y *= scalingFactor;
-        i += blockDim.x * gridDim.x;
-    }
-}
