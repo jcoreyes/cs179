@@ -48,21 +48,24 @@ void checkCUDAKernelError()
 
 }
 
-__global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx, float *dev_sinogram, const int totalSize) {
+__global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx,
+        float *dev_sinogram, const int totalSize, const int sinogram_width) {
 
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     while(i < totalSize) {
-        dev_sinogram[i] = dev_sinogram_cmplx[i].x;
+        dev_sinogram[i] = dev_sinogram_cmplx[i].x / (float) sinogram_width;
         i += blockDim.x * gridDim.x;
     }
  
 }
 
 void cudaCallExtractReal(const unsigned int nBlocks, const unsigned int threadsPerBlock,
-        cufftComplex *dev_sinogram_cmplx, float *dev_sinogram_float, const int totalSize){
+        cufftComplex *dev_sinogram_cmplx, float *dev_sinogram_float, const int totalSize,
+        const int sinogram_width){
 
-    cudaExtractReal<<<nBlocks, threadsPerBlock>>>( dev_sinogram_cmplx, dev_sinogram_float, totalSize);
+    cudaExtractReal<<<nBlocks, threadsPerBlock>>>( dev_sinogram_cmplx, dev_sinogram_float, totalSize,
+            sinogram_width);
 }
 
 __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
@@ -72,9 +75,12 @@ __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
 
     /*Divide all data by the value pointed to by max_abs_val. */
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int sinogram_center = (int) sinogram_width / 2.0;
+    int dist_from_center = (int) fabsf(i % sinogram_width - sinogram_center);
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
     // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
-    float scalingFactor = 1 - fabsf(1 - 2*(i % sinogram_width)) / sinogram_width;
+    //float scalingFactor = 1.0 - fabsf(1.0 - 2.0*(i % sinogram_width) / sinogram_width);
+    float scalingFactor = fabsf(1.0 - (float) dist_from_center / sinogram_center); 
     //float scalingFactor = 0.5; 
     while(i < totalSize) {
         dev_sinogram_cmplx[i].x *= scalingFactor;
@@ -87,7 +93,7 @@ __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
 void cudaCallFrequencyScaleKernel(const unsigned int blocks, const unsigned int threadsPerBlock,
     cufftComplex *dev_sinogram_cmplx, const int sinogram_width, const int nAngles) {
 
-    //cudaFrequencyScaleKernel<<<blocks, threadsPerBlock>>>(dev_sinogram_cmplx, sinogram_width, nAngles);
+   cudaFrequencyScaleKernel<<<blocks, threadsPerBlock>>>(dev_sinogram_cmplx, sinogram_width, nAngles);
 
 }
 
@@ -133,8 +139,8 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
             if (x_i < 0 || (q < 0 && x_i > 0))
                 d = -d;               
         }
-        //output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
-        output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
+        output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
+        //output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
     }
     //    }
     //}
@@ -185,7 +191,7 @@ int main(int argc, char** argv){
 
     // GPU DATA STORAGE
     cufftComplex *dev_sinogram_cmplx;
-    float *dev_sinogram_float; 
+    float* dev_sinogram_float; 
     float* output_dev;  // Image storage
 
     // Texture data storage
@@ -248,18 +254,22 @@ int main(int argc, char** argv){
         Note: If you want to deal with real-to-complex and complex-to-real
         transforms in cuFFT, you'll have to slightly change our code above.
     */
-   
+    int rank_size = {sinogram_width};
+    //int * rank_size = (int*) malloc(nAngles*sizeof(int));
+    //for (int i=1; i<nAngles; i++) {rank_size[i] = sinogram_cmplx_byte_size;}
     /* Create a cuFFT plan for the forward transform. */
     cufftHandle plan;
     int batch = nAngles; // Number of transforms to run
-
-    cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2C, batch);
+    cufftPlanMany(&plan, 1, &rank_size, NULL,
+           NULL, NULL, NULL, NULL, 
+          NULL, CUFFT_C2C, nAngles);
+    //cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2C, batch);
     /* Run the forward DFT on the input signal in-place */
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
 
     printf("Executing frequency scale kernel\n");
     /* Call frequency scaling kernel */
-    cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
+    //cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
     printf("Finished executing scale kernel\n");
 
     /* Create new cuFFT plan for backward transform. */
@@ -269,7 +279,8 @@ int main(int argc, char** argv){
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_INVERSE);
 
     printf("Copying sinogram data data back to host\n");
-    cudaCallExtractReal(nBlocks, threadsPerBlock, dev_sinogram_cmplx, dev_sinogram_float, sinogram_width*nAngles);
+    cudaCallExtractReal(nBlocks, threadsPerBlock, dev_sinogram_cmplx, dev_sinogram_float,
+            sinogram_width*nAngles, sinogram_width);
     /* Copy data back to host */
     cudaMemcpy( sinogram_float, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
     cudaFree(dev_sinogram_cmplx);
