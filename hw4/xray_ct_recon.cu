@@ -13,6 +13,7 @@ Adapted by Kevin Yuh (2015)
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <cufft.h>
+#include <cmath>
 #define PI 3.14159265358979
 
 /* Check errors on CUDA runtime functions */
@@ -54,7 +55,7 @@ __global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx,
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     while(i < totalSize) {
-        dev_sinogram[i] = dev_sinogram_cmplx[i].x / (float) sinogram_width;
+        dev_sinogram[i] = dev_sinogram_cmplx[i].x;// (float) sinogram_width;
         i += blockDim.x * gridDim.x;
     }
  
@@ -74,15 +75,17 @@ __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
     const int totalSize = nAngles * sinogram_width;
 
     /*Divide all data by the value pointed to by max_abs_val. */
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int sinogram_center = (int) sinogram_width / 2.0;
-    int dist_from_center = (int) fabsf(i % sinogram_width - sinogram_center);
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int sinogram_center = (int) ((float)sinogram_width / 2.0);
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
     // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
     //float scalingFactor = 1.0 - fabsf(1.0 - 2.0*(i % sinogram_width) / sinogram_width);
-    float scalingFactor = fabsf(1.0 - (float) dist_from_center / sinogram_center); 
     //float scalingFactor = 0.5; 
     while(i < totalSize) {
+        int dist_from_center = (int) abs((float)(i % sinogram_width - sinogram_center));
+        float scalingFactor = (1.0 - (float) dist_from_center / sinogram_center); 
+        printf("%d %f %d\n", i % sinogram_width, scalingFactor, dist_from_center);
+        //scalingFactor = 1;
         dev_sinogram_cmplx[i].x *= scalingFactor;
         dev_sinogram_cmplx[i].y *= scalingFactor;
         i += blockDim.x * gridDim.x;
@@ -104,10 +107,9 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
     int x = blockIdx.x * blockDim.x + threadIdx.x; // pixel coord
     int y = blockIdx.y * blockDim.y + threadIdx.y; // pixel coord
     int x_geo = x - mid_width;
-    int y_geo = y - mid_height;
+    int y_geo = mid_height - y;
     float x_i, y_i;
-    int d;
-    float theta, m, q;
+    float theta, m, q, d;
     //for(;x < width; x += blockDim.x * gridDim.x) {
     //    for(; y < height; y += blockDim.y * gridDim.y) {
     for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
@@ -120,12 +122,6 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
         else if (theta == PI/2) {
             d = y_geo;
         }
-        else if (theta == PI) {
-            d = -x_geo;
-        }
-        else if (theta == 3*PI/2) {
-            d = -y_geo;
-        }
         else {
              // Calculate slope from theta
             m = -cos(theta)/sin(theta);
@@ -133,14 +129,14 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
             // Handle edge cases
             x_i = (float)(y_geo - m*x_geo) / (q - m);
             y_i = q*x_i;
-            d = (int) sqrtf((x_i*x_i + y_i*y_i));
+            d = sqrtf((x_i*x_i + y_i*y_i));
 
             // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
             if (x_i < 0 || (q < 0 && x_i > 0))
                 d = -d;               
         }
         output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
-        //output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
+       // output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
     }
     //    }
     //}
@@ -158,6 +154,7 @@ void cudaCallBackProjection(const dim3 blocknum, const dim3 blocksize,
 
 
 int main(int argc, char** argv){
+    cudaSetDevice(1);
     printf("Starting program\n");
     if (argc != 7){
         fprintf(stderr, "Incorrect number of arguments.\n\n");
@@ -260,16 +257,16 @@ int main(int argc, char** argv){
     /* Create a cuFFT plan for the forward transform. */
     cufftHandle plan;
     int batch = nAngles; // Number of transforms to run
-    cufftPlanMany(&plan, 1, &rank_size, NULL,
-           NULL, NULL, NULL, NULL, 
-          NULL, CUFFT_C2C, nAngles);
-    //cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2C, batch);
+//    cufftPlanMany(&plan, 1, &rank_size, NULL,
+//           NULL, NULL, NULL, NULL, 
+//          NULL, CUFFT_C2C, nAngles);
+    cufftPlan1d(&plan, sinogram_width, CUFFT_C2C, batch);
     /* Run the forward DFT on the input signal in-place */
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
 
     printf("Executing frequency scale kernel\n");
     /* Call frequency scaling kernel */
-    //cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
+    cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
     printf("Finished executing scale kernel\n");
 
     /* Create new cuFFT plan for backward transform. */
