@@ -76,15 +76,15 @@ __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
 
     /*Divide all data by the value pointed to by max_abs_val. */
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int sinogram_center = (int) ((float)sinogram_width / 2.0);
+    int sinogram_center =  (sinogram_width / 2.0);
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
     // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
     //float scalingFactor = 1.0 - fabsf(1.0 - 2.0*(i % sinogram_width) / sinogram_width);
     //float scalingFactor = 0.5; 
     while(i < totalSize) {
-        int dist_from_center = (int) abs((float)(i % sinogram_width - sinogram_center));
+        int dist_from_center = abs((float)(i % sinogram_width - sinogram_center));
         float scalingFactor = (1.0 - (float) dist_from_center / sinogram_center); 
-        printf("%d %f %d\n", i % sinogram_width, scalingFactor, dist_from_center);
+        //printf("%d %f %d\n", i % sinogram_width, scalingFactor, dist_from_center);
         //scalingFactor = 1;
         dev_sinogram_cmplx[i].x *= scalingFactor;
         dev_sinogram_cmplx[i].y *= scalingFactor;
@@ -101,45 +101,45 @@ void cudaCallFrequencyScaleKernel(const unsigned int blocks, const unsigned int 
 }
 
 __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const int sinogram_width,
-    const int nAngles, const int width, const int height, const float theta_step,const int mid_width,
+    const int nAngles, const int width, const int height, float theta_step,const int mid_width,
     const int mid_height,const int mid_sinogram_width) {
 
     int x = blockIdx.x * blockDim.x + threadIdx.x; // pixel coord
     int y = blockIdx.y * blockDim.y + threadIdx.y; // pixel coord
-    int x_geo = x - mid_width;
-    int y_geo = mid_height - y;
+    float x_geo, y_geo;
     float x_i, y_i;
     float theta, m, q, d;
-    //for(;x < width; x += blockDim.x * gridDim.x) {
-    //    for(; y < height; y += blockDim.y * gridDim.y) {
-    for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
-        // Calculate theta based on angle number
-        theta = (float)thetaNo * theta_step;
+    for(;x < width; x += blockDim.x * gridDim.x) {
+        for(; y < height; y += blockDim.y * gridDim.y) {
+            for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
+                // Calculate theta based on angle number
+                theta = thetaNo * PI / nAngles;
+                x_geo = x - mid_width;
+                y_geo = mid_height - y;
+                if (theta == 0) {
+                    d = x_geo;
+                }
+                else if (theta == PI/2) {
+                    d = y_geo;
+                }
+                else {
+                     // Calculate slope from theta
+                    m = -cos(theta)/sin(theta);
+                    q = -1.0f/m;
+                    // Handle edge cases
+                    x_i = (y_geo - m*x_geo) / (q - m);
+                    y_i = q*x_i;
+                    d = sqrtf((x_i*x_i + y_i*y_i));
 
-        if (theta == 0) {
-            d = x_geo;
+                    // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
+                    if (x_i < 0 || (q < 0 && x_i > 0))
+                        d = -d;               
+                }
+                output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
+               // output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
+            }
         }
-        else if (theta == PI/2) {
-            d = y_geo;
-        }
-        else {
-             // Calculate slope from theta
-            m = -cos(theta)/sin(theta);
-            q = -1.0/m;
-            // Handle edge cases
-            x_i = (float)(y_geo - m*x_geo) / (q - m);
-            y_i = q*x_i;
-            d = sqrtf((x_i*x_i + y_i*y_i));
-
-            // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
-            if (x_i < 0 || (q < 0 && x_i > 0))
-                d = -d;               
-        }
-        output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
-       // output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
     }
-    //    }
-    //}
 }
 
 void cudaCallBackProjection(const dim3 blocknum, const dim3 blocksize, 
@@ -251,15 +251,9 @@ int main(int argc, char** argv){
         Note: If you want to deal with real-to-complex and complex-to-real
         transforms in cuFFT, you'll have to slightly change our code above.
     */
-    int rank_size = {sinogram_width};
-    //int * rank_size = (int*) malloc(nAngles*sizeof(int));
-    //for (int i=1; i<nAngles; i++) {rank_size[i] = sinogram_cmplx_byte_size;}
     /* Create a cuFFT plan for the forward transform. */
     cufftHandle plan;
     int batch = nAngles; // Number of transforms to run
-//    cufftPlanMany(&plan, 1, &rank_size, NULL,
-//           NULL, NULL, NULL, NULL, 
-//          NULL, CUFFT_C2C, nAngles);
     cufftPlan1d(&plan, sinogram_width, CUFFT_C2C, batch);
     /* Run the forward DFT on the input signal in-place */
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
@@ -269,10 +263,7 @@ int main(int argc, char** argv){
     cudaCallFrequencyScaleKernel(nBlocks, threadsPerBlock, dev_sinogram_cmplx, sinogram_width, nAngles);
     printf("Finished executing scale kernel\n");
 
-    /* Create new cuFFT plan for backward transform. */
-    //cufftPlan1d(&plan, sinogram_cmplx_byte_size, CUFFT_C2R, batch);
     /* Run backward DFT on output signal and extract real part */
-    //cufftExecC2R(plan, dev_sinogram_cmplx, dev_sinogram_float);
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_INVERSE);
 
     printf("Copying sinogram data data back to host\n");
@@ -281,7 +272,7 @@ int main(int argc, char** argv){
     /* Copy data back to host */
     cudaMemcpy( sinogram_float, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
     cudaFree(dev_sinogram_cmplx);
-
+    cufftDestroy(plan);
 
     /* TODO 2: Implement backprojection.
         - Allocate memory for the output image.
