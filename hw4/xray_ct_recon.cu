@@ -62,13 +62,11 @@ __global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx,
 }
 
 __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
-    const int sinogram_width, const int nAngles) {
-
-    const int totalSize = nAngles * sinogram_width;
+    const int sinogram_width, const int totalSize) {
 
     /*Divide all data by the value pointed to by max_abs_val. */
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int sinogram_center =  (sinogram_width / 2.0);
+    float sinogram_center =  ((sinogram_width - 1)/ 2.0);
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
     // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
     //float scalingFactor = 1.0 - fabsf(1.0 - 2.0*(i % sinogram_width) / sinogram_width);
@@ -91,7 +89,7 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
     float x_geo, y_geo;
     float x_i, y_i;
     float theta, m, q, d;
-    print("%d %d\n", x, y);
+    float mid = (sinogram_width - 1) / 2.0;
     for(;x < width; x += blockDim.x * gridDim.x) {
         for(; y < height; y += blockDim.y * gridDim.y) {
             for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
@@ -118,7 +116,7 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
                     if (x_i < 0 || (q < 0 && x_i > 0))
                         d = -d;               
                 }
-                output_dev[y*width + x] += tex2D(texreference, mid_sinogram_width + d, thetaNo);
+                output_dev[y*width + x] += tex2D(texreference, mid+ d, thetaNo);
                // output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
             }
         }
@@ -154,9 +152,9 @@ int main(int argc, char** argv){
     int sinogram_cmplx_byte_size = (sinogram_width*nAngles*sizeof(cufftComplex));
     int sinogram_byte_size = sinogram_width*nAngles*sizeof(float);
 
-    int mid_width = (int) floor((float) width / 2.0);
-    int mid_height = (int) floor((float) height / 2.0);
-    int mid_sinogram_width = (int) floor((float) sinogram_width/2.0);
+    int mid_width = (int) floor(width / 2.0);
+    int mid_height = (int) floor(height / 2.0);
+    int mid_sinogram_width = (int) floor(sinogram_width/2.0);
     /********** Data storage *********/
 
     // GPU DATA STORAGE
@@ -228,8 +226,8 @@ int main(int argc, char** argv){
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_FORWARD);
 
     /* Call frequency scaling kernel */
-    cudaFrequencyScaleKernel<<<blocks, threadsPerBlock>>>(dev_sinogram_cmplx, 
-        sinogram_width, nAngles);
+    cudaFrequencyScaleKernel<<<nBlocks, threadsPerBlock>>>(dev_sinogram_cmplx, 
+        sinogram_width, sinogram_width*nAngles);
 
     /* Run backward DFT on output signal and extract real part */
     cufftExecC2C(plan, dev_sinogram_cmplx, dev_sinogram_cmplx, CUFFT_INVERSE);
@@ -238,7 +236,7 @@ int main(int argc, char** argv){
         dev_sinogram_float, sinogram_width*nAngles);
 
     /* Copy data back to host */
-    cudaMemcpy( sinogram_float, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy( sinogram_host, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
     cudaFree(dev_sinogram_cmplx);
     cufftDestroy(plan);
 
@@ -269,7 +267,7 @@ int main(int argc, char** argv){
     blocknum.x=(int) ceil((float)width/16);
     blocknum.y=(int) ceil((float)height/16);
 
-
+    printf("Starting back projection\n");
     cudaBackProjection<<<blocknum, blocksize>>>(output_dev, 
         dev_sinogram_float, sinogram_width, nAngles, width, height,
         mid_width, mid_height, mid_sinogram_width);
@@ -295,7 +293,6 @@ int main(int argc, char** argv){
 
 
     /* Cleanup: Free host memory, close files. */
-    free(sinogram_float);
     free(sinogram_host);
     free(output_host);
 
