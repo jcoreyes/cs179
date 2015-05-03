@@ -49,6 +49,7 @@ void checkCUDAKernelError()
 
 }
 
+/* Extract real part of complex numbers */
 __global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx,
         float *dev_sinogram, const int totalSize) {
 
@@ -61,63 +62,68 @@ __global__ void cudaExtractReal(cufftComplex *dev_sinogram_cmplx,
  
 }
 
+/* Perform ramp filter for complex signal */
 __global__ void cudaFrequencyScaleKernel(cufftComplex *dev_sinogram_cmplx,
     const int sinogram_width, const int totalSize) {
 
-    /*Divide all data by the value pointed to by max_abs_val. */
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     float sinogram_center =  ((sinogram_width - 1)/ 2.0);
     // For a given angle, scaling factor is 1 - dist_from_center / (n/2)
-    // = 1 - abs(n/2 - i) / (n/2) = 1 - abs(1 - 2*i/n)
-    //float scalingFactor = 1.0 - fabsf(1.0 - 2.0*(i % sinogram_width) / sinogram_width);
     while(i < totalSize) {
+        // Calculate dist from center
         int dist_from_center = abs((float)(i % sinogram_width - sinogram_center));
+        // Calculate scaling factor
         float scalingFactor = (1.0 - (float) dist_from_center / sinogram_center); 
-        //printf("%d %f %d\n", i % sinogram_width, scalingFactor, dist_from_center);
         dev_sinogram_cmplx[i].x *= scalingFactor;
         dev_sinogram_cmplx[i].y *= scalingFactor;
         i += blockDim.x * gridDim.x;
     }
 }
 
+/* Perform back projection to reconstruct image from sinogram data */
 __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const int sinogram_width,
     const int nAngles, const int width, const int height,const int mid_width,
-    const int mid_height,const int mid_sinogram_width) {
+    const int mid_height,const float mid_sinogram) {
 
     int x = blockIdx.x * blockDim.x + threadIdx.x; // pixel coord
     int y = blockIdx.y * blockDim.y + threadIdx.y; // pixel coord
-    float x_geo, y_geo;
-    float x_i, y_i;
+    float x_geo, y_geo; // geometric coord
+    float x_i, y_i; // intersection point
     float theta, m, q, d;
-    float mid = (sinogram_width - 1) / 2.0;
+    // Don't go past bounds of image. Paralellize over pixels
     for(;x < width; x += blockDim.x * gridDim.x) {
         for(; y < height; y += blockDim.y * gridDim.y) {
             for(int thetaNo = 0 ; thetaNo < nAngles; thetaNo++) {
                 // Calculate theta based on angle number
                 theta = thetaNo * PI / nAngles;
+                // Convert pixel coord to geometric coordinate
                 x_geo = x - mid_width;
                 y_geo = mid_height - y;
-                if (theta <= 0.01) {
+                // Handle edges cases where theta is at 0 or pi/2
+                if (theta == 0) {
                     d = x_geo;
                 }
-                else if (abs(theta - PI/2) <= 0.01) {
+                else if (theta == PI/2) {
                     d = y_geo;
                 }
                 else {
                      // Calculate slope from theta
                     m = -1.0f/tan(theta);
                     q = -1.0f/m;
-                    // Handle edge cases
+                    // Find intersection point
                     x_i = (y_geo - m*x_geo) / (q - m);
                     y_i = q*x_i;
+                    // Calculate distance
                     d = sqrtf((x_i*x_i + y_i*y_i));
-
-                    // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
+                    // Use -d instead of d when q > 0 and x_i < 0 or if -1/m < 0 and x_i > 0
                     if ((q > 0 && x_i < 0) || (q < 0 && x_i > 0))
                         d = -d;               
                 }
-                output_dev[y*width + x] += tex2D(texreference, mid + d, thetaNo);
-                //output_dev[y*width + x] += dev_sinogram[(int)mid +(int) d + thetaNo *sinogram_width];
+                // Use texture memory to read from sinogram data
+                output_dev[y*width + x] += tex2D(texreference, (int)mid_sinogram + (int)d, thetaNo);
+                // To use global memory instead of texture memory, comment the previous
+                // line and uncomment the next line.
+                //output_dev[y*width + x] += dev_sinogram[(int)mid_sinogram +(int) d + thetaNo *sinogram_width];
             }
         }
     }
@@ -154,7 +160,8 @@ int main(int argc, char** argv){
 
     int mid_width = (int) floor(width / 2.0);
     int mid_height = (int) floor(height / 2.0);
-    int mid_sinogram_width = (int) floor(sinogram_width/2.0);
+    // Get true mid point by subtracting 1 since we're zero indexing
+    int mid_sinogram_width = (int) floor((sinogram_width-1)/2.0);
     /********** Data storage *********/
 
     // GPU DATA STORAGE
@@ -206,7 +213,7 @@ int main(int argc, char** argv){
     gpuErrchk( cudaMemcpy(dev_sinogram_cmplx, sinogram_host, sinogram_cmplx_byte_size,
                  cudaMemcpyHostToDevice));
 
-    /* TODO 1: Implement the high-pass filter:
+    /* Implement the high-pass filter:
         - Use cuFFT for the forward FFT
         - Create your own kernel for the frequency scaling.
         - Use cuFFT for the inverse FFT
@@ -235,12 +242,11 @@ int main(int argc, char** argv){
     cudaExtractReal<<<nBlocks, threadsPerBlock>>>( dev_sinogram_cmplx, 
         dev_sinogram_float, sinogram_width*nAngles);
 
-    /* Copy data back to host */
-    cudaMemcpy( sinogram_host, dev_sinogram_float, sinogram_byte_size, cudaMemcpyDeviceToHost);
+    // Free dev data and destroy plan
     cudaFree(dev_sinogram_cmplx);
     cufftDestroy(plan);
 
-    /* TODO 2: Implement backprojection.
+    /* Implement backprojection.
         - Allocate memory for the output image.
         - Create your own kernel to accelerate backprojection.
         - Copy the reconstructed image back to output_host.
@@ -260,8 +266,11 @@ int main(int argc, char** argv){
     texreference.addressMode[0] = cudaAddressModeClamp;
     texreference.addressMode[1] = cudaAddressModeClamp;
 
+    // Bind texture to array
     cudaBindTextureToArray(texreference,carray);
 
+    // Block size will be 16x16
+    // Use necessary grid size to cover image
     blocksize.x=16;
     blocksize.y=16;
     blocknum.x=(int) ceil((float)width/16);

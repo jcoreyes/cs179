@@ -149,6 +149,12 @@ thread is writing the same value, then this assures the flag is set to 1.
 At the end of the kernel, the first thread in the block will then do an atomic 
 bit wise or to the global flag.
 
+However, if we can't assume that atleast one write gets through, then each
+time a thread sets F[j] to true, we will do an atomic write to the
+global flag. If the graph is dense, then this approach will be slower as
+many threads will be adding nodes to the frontier and doing this atomic
+write which is blocking. So this approach will be better if the graph
+is sparse.
 
 
 
@@ -215,8 +221,12 @@ atomically unsafe operations since we didn't have multiple thread accessing
 the same pixel. For the PET reconstruction, we are paralellizing over
 entries in the list. Multiplie entries in the list could add to the same
 pixel so we have to worry about accessing the same pixel. This addition will
-have to be atomic.
+have to be atomic which will slown down the computation.
 We also cannot use texture memory since our accesses are not 2d spatially local.
+The list of measurements are sorted by time of their detection and not necessarily
+by location of the measurement so threads won't be accessing measurement data
+that is around each other.
+
 
 
 
