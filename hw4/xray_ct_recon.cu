@@ -97,10 +97,10 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
                 theta = thetaNo * PI / nAngles;
                 x_geo = x - mid_width;
                 y_geo = mid_height - y;
-                if (theta == 0) {
+                if (theta <= 0.01) {
                     d = x_geo;
                 }
-                else if (theta == PI/2) {
+                else if (abs(theta - PI/2) <= 0.01) {
                     d = y_geo;
                 }
                 else {
@@ -113,11 +113,11 @@ __global__ void cudaBackProjection(float *output_dev, float *dev_sinogram, const
                     d = sqrtf((x_i*x_i + y_i*y_i));
 
                     // Use -d instead of d when x_i < 0 or if -1/m < 0 and x_i ? 0
-                    if (x_i < 0 || (q < 0 && x_i > 0))
+                    if ((q > 0 && x_i < 0) || (q < 0 && x_i > 0))
                         d = -d;               
                 }
-                output_dev[y*width + x] += tex2D(texreference, mid+ d, thetaNo);
-               // output_dev[y*width + x] += dev_sinogram[mid_sinogram_width + d + thetaNo *sinogram_width];
+                output_dev[y*width + x] += tex2D(texreference, mid + d, thetaNo);
+                //output_dev[y*width + x] += dev_sinogram[(int)mid +(int) d + thetaNo *sinogram_width];
             }
         }
     }
