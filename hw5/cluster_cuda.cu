@@ -59,13 +59,12 @@ float squared_distance(float *a, float *b, int stride, int size) {
 __global__
 void sloppyClusterKernel(float *clusters, int *cluster_counts, int k, 
                           float *data, int *output, int batch_size) {
-    unsigned int tid = threadIdx.x
+    unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     extern __shared__ float cluster_data[];
-    unsigned int tid = threadIdx.x;
     // Load cluster centers into shared memory
     while (tid < k*REVIEW_DIM) {
-        sdata[tid] = clusters[tid];
+        cluster_data[tid] = clusters[tid];
         tid += blockDim.x;
     }
     __syncthreads(); 
@@ -84,7 +83,7 @@ void sloppyClusterKernel(float *clusters, int *cluster_counts, int k,
             }
             // Update if distance is less
             if (curr_dist < min_dist) {
-                min_dist == curr_dist;
+                min_dist = curr_dist;
                 closest = c;
             }
 
@@ -96,7 +95,7 @@ void sloppyClusterKernel(float *clusters, int *cluster_counts, int k,
         float s_n;
         for (int j=0; j < REVIEW_DIM; j++) {
             s_n = clusters[closest*REVIEW_DIM + j]; 
-            clusters[closest*REVIEW_DIM + j] = (n * s_n + data[i*REVIEW_DIM+j]) / (n + 1)
+            clusters[closest*REVIEW_DIM + j] = (n * s_n + data[i*REVIEW_DIM+j]) / (n + 1);
         }        
         cluster_counts[closest]++;
         // Increment if not enough threads

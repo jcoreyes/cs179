@@ -119,33 +119,33 @@ void cluster(int k, int batch_size) {
     int buff_byte_size = batch_size * REVIEW_DIM * sizeof(float);
     float **host_buffs;
     float **dev_input_buffs;
-    float **dev_output_buffs;
+    int **dev_output_buffs;
     cudaStream_t stream[2];
     for (int i=0; i < 2; i++) {
         gpuErrChk(cudaMalloc(&dev_input_buffs[i], buff_byte_size));
         gpuErrChk(cudaMalloc(&dev_output_buffs[i], batch_size * sizeof(int)));
-        host_buff[i] = (float *) malloc(buff_byte_size);
+        host_buffs[i] = (float *) malloc(buff_byte_size);
         cudaStreamCreate(&stream[i]);
     }
 
     // main loop to process input lines (each line corresponds to a review)
     int review_idx = 0;
     for (string review_str; getline(cin, review_str); review_idx++) {
-        readLSAReview(review_str, host_buff[0]);
-        getline(cin, review_str)
-        readLSAReview(review_str, host_buff[1]);
+        readLSAReview(review_str, host_buffs[0]);
+        getline(cin, review_str);
+        readLSAReview(review_str, host_buffs[1]);
 
         // TODO: readLSAReview into appropriate storage
         if (review_idx % batch_size == 0) {
             for (int i = 0; i < 2; i++) {
-                struct printerArg *printer_arg = malloc(sizeof(printerArg));
+                struct printerArg *printer_arg = (struct printerArg *) malloc(sizeof(printerArg));
                 printer_arg->review_idx_start = review_idx;
                 printer_arg->batch_size = batch_size;
                 printer_arg->cluster_assignments = (int*) malloc(batch_size*sizeof(int));
 
-                cudaMemcpyAsync(dev_input_buffs[i], host_buff[i], buff_byte_size,
+                cudaMemcpyAsync(dev_input_buffs[i], host_buffs[i], buff_byte_size,
                         cudaMemcpyHostToDevice, stream[i]);
-                cudaCluster(clusters, cluster_counts, k, dev_input_buffs[i], 
+                cudaCluster(d_clusters, d_cluster_counts, k, dev_input_buffs[i], 
                         dev_output_buffs[i], batch_size, stream[i]);
                 cudaMemcpyAsync(printer_arg->cluster_assignments, dev_output_buffs[i], 
                         batch_size*sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
