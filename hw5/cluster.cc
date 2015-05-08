@@ -58,7 +58,9 @@ void gaussianFill(float *output, int size) {
     std::default_random_engine generator;
     std::normal_distribution<float> distribution(0.0, 1.0);
     for (int i=0; i < size; i++) {
-        output[i] = distribution(generator);
+        output[i] += distribution(generator);
+        output[i] *= distribution(generator);
+        output[i] -= distribution(generator);
     }
 }
 
@@ -117,43 +119,45 @@ void cluster(int k, int batch_size) {
     
     // TODO: allocate copy buffers and streams
     int buff_byte_size = batch_size * REVIEW_DIM * sizeof(float);
-    float **host_buffs;
-    float **dev_input_buffs;
-    int **dev_output_buffs;
+    float **host_buffs = (float **) malloc(2 * sizeof(float*));
+    float **dev_input_buffs = (float **) malloc(2 * sizeof(float*));;
+    int **dev_output_buffs = (int **) malloc(2 * sizeof(int*)); ;
     cudaStream_t stream[2];
     for (int i=0; i < 2; i++) {
         gpuErrChk(cudaMalloc(&dev_input_buffs[i], buff_byte_size));
         gpuErrChk(cudaMalloc(&dev_output_buffs[i], batch_size * sizeof(int)));
-        host_buffs[i] = (float *) malloc(buff_byte_size);
+        cudaMallocHost(&host_buffs[i], buff_byte_size);
         cudaStreamCreate(&stream[i]);
     }
 
     // main loop to process input lines (each line corresponds to a review)
     int review_idx = 0;
+    int buffer_no = 0;
     for (string review_str; getline(cin, review_str); review_idx++) {
-        readLSAReview(review_str, host_buffs[0]);
-        getline(cin, review_str);
-        readLSAReview(review_str, host_buffs[1]);
+        readLSAReview(review_str, host_buffs[buffer_no] + REVIEW_DIM * (review_idx % batch_size));
 
-        // TODO: readLSAReview into appropriate storage
         if (review_idx % batch_size == 0) {
-            for (int i = 0; i < 2; i++) {
-                struct printerArg *printer_arg = (struct printerArg *) malloc(sizeof(printerArg));
-                printer_arg->review_idx_start = review_idx;
-                printer_arg->batch_size = batch_size;
-                printer_arg->cluster_assignments = (int*) malloc(batch_size*sizeof(int));
+            struct printerArg *printer_arg = (struct printerArg *) malloc(sizeof(printerArg));
+            printer_arg->review_idx_start = review_idx;
+            printer_arg->batch_size = batch_size;
+            printer_arg->cluster_assignments = (int*) malloc(batch_size*sizeof(int));
 
-                cudaMemcpyAsync(dev_input_buffs[i], host_buffs[i], buff_byte_size,
-                        cudaMemcpyHostToDevice, stream[i]);
-                cudaCluster(d_clusters, d_cluster_counts, k, dev_input_buffs[i], 
-                        dev_output_buffs[i], batch_size, stream[i]);
-                cudaMemcpyAsync(printer_arg->cluster_assignments, dev_output_buffs[i], 
-                        batch_size*sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
-                cudaStreamAddCallback(stream[i], printerCallback, (void*)printer_arg, 0);
-        }
-                // TODO: if you have filled up a batch, copy H->D, kernel, copy D->H,
-                //       and set callback to printerCallback. Will need to allocate
-                //       printerArg struct. Do all of this in a stream.
+            cudaMemcpyAsync(dev_input_buffs[buffer_no], host_buffs[buffer_no], buff_byte_size,
+                    cudaMemcpyHostToDevice, stream[buffer_no]);
+
+            cudaCluster(d_clusters, d_cluster_counts, k, dev_input_buffs[buffer_no], 
+                    dev_output_buffs[buffer_no], batch_size, stream[buffer_no]);
+
+            cudaMemcpyAsync(printer_arg->cluster_assignments, dev_output_buffs[buffer_no], 
+                    batch_size*sizeof(int), cudaMemcpyDeviceToHost, stream[buffer_no]);
+
+            cudaStreamAddCallback(stream[buffer_no], printerCallback, (void*)printer_arg, 0);
+            if (buffer_no == 1) {
+                buffer_no = 0;
+            }
+            else {
+                buffer_no = 1;
+            }
         }
 
     }
@@ -188,6 +192,6 @@ void cluster(int k, int batch_size) {
 }
 
 int main() {
-    cluster(5, 32);
+    cluster(20, 32);
     return 0;
 }

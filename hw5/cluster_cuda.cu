@@ -1,7 +1,8 @@
 #include <cassert>
 #include <cuda_runtime.h>
 #include "cluster_cuda.cuh"
-
+#include <stdio.h>
+#include <float.h>
 // This assumes address stores the average of n elements atomically updates
 // address to store the average of n + 1 elements (the n elements as well as
 // val). This might be useful for updating cluster centers.
@@ -67,37 +68,36 @@ void sloppyClusterKernel(float *clusters, int *cluster_counts, int k,
         cluster_data[tid] = clusters[tid];
         tid += blockDim.x;
     }
-    __syncthreads(); 
-
+    __syncthreads();
     while (i < batch_size) {
         // Initialize min dist to max possible float
-        float min_dist = 1e10;
+        float min_dist = FLT_MAX;
         int closest = 0;
         // Iterate through clusters and keep track of closest center
-        for (int c=0; c < k; c++) {
+        for (int c=0; c<k; c++) {
             // Compute distance from a review to a cluster
-            float curr_dist = 0;
-            for (int j=0; j < REVIEW_DIM; j++) {
-                float dist = (data[i*REVIEW_DIM + j] - cluster_data[c*REVIEW_DIM + j]);
-                curr_dist += dist * dist;
-            }
+            float curr_dist = squared_distance(data+i*REVIEW_DIM, cluster_data+c*REVIEW_DIM,
+                    1, REVIEW_DIM);
+            //printf("%d Curr dist %f to center %d\n", i, curr_dist, c);
             // Update if distance is less
-            if (curr_dist < min_dist) {
+            if (curr_dist <= min_dist) {
                 min_dist = curr_dist;
                 closest = c;
             }
 
         }
+        //printf("Center2 %f %f %f\n", cluster_data[2*REVIEW_DIM],
+        //        cluster_data[2*REVIEW_DIM+1], cluster_data[2*REVIEW_DIM+2]);        
+        //printf("Center3 %f %f %f\n", cluster_data[3*REVIEW_DIM],
+        //        cluster_data[3*REVIEW_DIM+1], cluster_data[3*REVIEW_DIM+2]);        
         // Write closest center
         output[i] = closest;
+        atomicAdd(cluster_counts+closest,1);
         // Update average of closest_cluster
-        int n = cluster_counts[closest];
-        float s_n;
         for (int j=0; j < REVIEW_DIM; j++) {
-            s_n = clusters[closest*REVIEW_DIM + j]; 
-            clusters[closest*REVIEW_DIM + j] = (n * s_n + data[i*REVIEW_DIM+j]) / (n + 1);
+            atomicUpdateAverage(clusters + closest*REVIEW_DIM + j, cluster_counts[closest],
+                    data[i*REVIEW_DIM+j]);
         }        
-        cluster_counts[closest]++;
         // Increment if not enough threads
         i += blockDim.x * gridDim.x;
     }
