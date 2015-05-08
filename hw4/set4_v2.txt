@@ -328,6 +328,11 @@ discussed near the end of Lecture 4.
 *** To do: Rewrite the setup and reconstruction code to texture cache the
 *** sinogram.
 
+I implemented texture caching but the image came out a tiny blurry. To swtich
+back to use global memory for the sinogram data, comment out the line
+in the back projection kernel which uses texture data and uncomment out the
+line which uses global memory using dev_sinogram_data.
+
 
 
 

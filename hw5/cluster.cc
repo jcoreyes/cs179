@@ -119,39 +119,50 @@ void cluster(int k, int batch_size) {
     
     // TODO: allocate copy buffers and streams
     int buff_byte_size = batch_size * REVIEW_DIM * sizeof(float);
+    // Allocate two each of host, dev input, and dev output buffers
     float **host_buffs = (float **) malloc(2 * sizeof(float*));
-    float **dev_input_buffs = (float **) malloc(2 * sizeof(float*));;
-    int **dev_output_buffs = (int **) malloc(2 * sizeof(int*)); ;
-    cudaStream_t stream[2];
+    float **dev_input_buffs = (float **) malloc(2 * sizeof(float*));
+    int **dev_output_buffs = (int **) malloc(2 * sizeof(int*));
+
     for (int i=0; i < 2; i++) {
         gpuErrChk(cudaMalloc(&dev_input_buffs[i], buff_byte_size));
         gpuErrChk(cudaMalloc(&dev_output_buffs[i], batch_size * sizeof(int)));
         cudaMallocHost(&host_buffs[i], buff_byte_size);
         cudaStreamCreate(&stream[i]);
     }
-
+    // Allocate stream
+    cudaStream_t stream[2];
+    
     // main loop to process input lines (each line corresponds to a review)
     int review_idx = 0;
-    int buffer_no = 0;
+    int buffer_no = 0; // What buffer we're currently using
     for (string review_str; getline(cin, review_str); review_idx++) {
+        // Load in review to appropiate host buffer
         readLSAReview(review_str, host_buffs[buffer_no] + REVIEW_DIM * (review_idx % batch_size));
-
+        // If we filled a buffer, then begin stream
         if (review_idx % batch_size == 0) {
+            // Allocate printer arguments for printing cluster assignments
             struct printerArg *printer_arg = (struct printerArg *) malloc(sizeof(printerArg));
             printer_arg->review_idx_start = review_idx;
             printer_arg->batch_size = batch_size;
             printer_arg->cluster_assignments = (int*) malloc(batch_size*sizeof(int));
 
+            // Asynchronous copy review data from host to device
             cudaMemcpyAsync(dev_input_buffs[buffer_no], host_buffs[buffer_no], buff_byte_size,
                     cudaMemcpyHostToDevice, stream[buffer_no]);
 
+            // Kernel call to cluster batch of reviews
             cudaCluster(d_clusters, d_cluster_counts, k, dev_input_buffs[buffer_no], 
                     dev_output_buffs[buffer_no], batch_size, stream[buffer_no]);
 
+            // Asynchonrous copy cluster assignments from device to host
             cudaMemcpyAsync(printer_arg->cluster_assignments, dev_output_buffs[buffer_no], 
                     batch_size*sizeof(int), cudaMemcpyDeviceToHost, stream[buffer_no]);
 
+            // Add callback for printing cluster assignments once done.
             cudaStreamAddCallback(stream[buffer_no], printerCallback, (void*)printer_arg, 0);
+
+            // Switch buffer number after using current one
             if (buffer_no == 1) {
                 buffer_no = 0;
             }
@@ -188,7 +199,16 @@ void cluster(int k, int batch_size) {
     delete[] cluster_counts;
     delete[] clusters;
 
-    // TODO: finish freeing memory, destroy streams
+    for (int i=0; i < 2; i++) {
+        gpuErrChk(cudaFree(dev_input_buffs[i]));
+        gpuErrChk(cudaFree(dev_output_buffs[i]));
+        gpuErrChk(cudaFree(host_buffs[i]));
+    }
+    delete[] dev_input_buffs;
+    delete[] dev_output_buffs;
+    delete[] host_buffs;
+    gpuErrChk(cudaStreamDestroy(stream));
+
 }
 
 int main() {
