@@ -124,12 +124,16 @@ void cluster(int k, int batch_size) {
     float **host_buffs = (float **) malloc(2 * sizeof(float*));
     float **dev_input_buffs = (float **) malloc(2 * sizeof(float*));
     int **dev_output_buffs = (int **) malloc(2 * sizeof(int*));
+    // Allocate stream
+    cudaStream_t stream[2];
 
     for (int i=0; i < 2; i++) {
         gpuErrChk(cudaMalloc(&dev_input_buffs[i], buff_byte_size));
         gpuErrChk(cudaMalloc(&dev_output_buffs[i], batch_size * sizeof(int)));
-        cudaMallocHost(&host_buffs[i], buff_byte_size);
-        cudaStreamCreate(&stream[i]);
+        //gpuErrChk(cudaMallocHost(&host_buffs[i], buff_byte_size));
+        host_buffs[i] = (float*) malloc(buff_byte_size);
+        gpuErrChk(cudaHostRegister(host_buffs[i], buff_byte_size, 0));
+        gpuErrChk(cudaStreamCreate(&stream[i]));
     }
     // Allocate stream
     cudaStream_t stream[2];
@@ -222,12 +226,14 @@ void cluster(int k, int batch_size) {
     for (int i=0; i < 2; i++) {
         gpuErrChk(cudaFree(dev_input_buffs[i]));
         gpuErrChk(cudaFree(dev_output_buffs[i]));
-        gpuErrChk(cudaFree(host_buffs[i]));
+        //cudaFreeHost(host_buffs[i]);
+        gpuErrChk(cudaHostUnregister(host_buffs[i]));
+        free(host_buffs[i]);
+        gpuErrChk(cudaStreamDestroy(stream[i]));
     }
     delete[] dev_input_buffs;
     delete[] dev_output_buffs;
     delete[] host_buffs;
-    gpuErrChk(cudaStreamDestroy(stream));
 
 }
 
