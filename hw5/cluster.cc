@@ -6,7 +6,7 @@
 #include <string>
 #include <sstream>
 #include <fstream>
-
+#include <math.h>
 #include <cuda_runtime.h>
 
 #include "cluster_cuda.cuh"
@@ -135,13 +135,13 @@ void cluster(int k, int batch_size) {
         gpuErrChk(cudaHostRegister(host_buffs[i], buff_byte_size, 0));
         gpuErrChk(cudaStreamCreate(&stream[i]));
     }
-    // Allocate stream
-    cudaStream_t stream[2];
     
     // initialize timers
     float batch_ms = -1;
     float total_ms = -1;
-
+    float copy1_ms = 0;
+    float copy2_ms = 0;
+    float cluster_ms = 0;
     // main loop to process input lines (each line corresponds to a review)
     int review_idx = 0;
     int buffer_no = 0; // What buffer we're currently using
@@ -153,33 +153,51 @@ void cluster(int k, int batch_size) {
     // Start timer
     START_TIMER();
 
-    for (string review_str; getline(testbuffer, review_str); review_idx++) {
-    //for (string review_str; getline(cin, review_str); review_idx++) {
+    //for (string review_str; getline(testbuffer, review_str); review_idx++) {
+    for (string review_str; getline(cin, review_str); review_idx++) {
         // Load in review to appropiate host buffer
         readLSAReview(review_str, host_buffs[buffer_no] + REVIEW_DIM * (review_idx % batch_size));
+        // If no more reviews but not a complete batch then adjust size
+        /*
+            if (cin.peek() == EOF) {
+                batch_size = review_idx % batch_size;
+                printf("Reached end of file at %d\n", review_idx);
+                printf("Setting batch size to %d\n", batch_size); 
+            }
+        */
         // If we filled a buffer or no more reviews, then begin stream
-        if (review_idx % batch_size == 0 || testbuffer.peek() == EOF) {
-            // If no more reviews but not a complete batch then adjust size
-            if (testbuffer.peek() == EOF && review_idx % batch_size != 0)
-                batch_size = review_idx % batch_size
+        if (review_idx % batch_size == 0 || cin.peek() == EOF) {
+            
             // Allocate printer arguments for printing cluster assignments
             struct printerArg *printer_arg = (struct printerArg *) malloc(sizeof(printerArg));
             printer_arg->review_idx_start = review_idx;
             printer_arg->batch_size = batch_size;
             printer_arg->cluster_assignments = (int*) malloc(batch_size*sizeof(int));
-
+            START_TIMER();
             // Asynchronous copy review data from host to device
             cudaMemcpyAsync(dev_input_buffs[buffer_no], host_buffs[buffer_no], buff_byte_size,
                     cudaMemcpyHostToDevice, stream[buffer_no]);
-
+            cudaStreamSynchronize(stream[buffer_no]);
+            STOP_RECORD_TIMER(batch_ms);
+            copy1_ms += batch_ms;
+            printf("Host to device copy time %fms\n", batch_ms);
             // Kernel call to cluster batch of reviews
+            START_TIMER();
             cudaCluster(d_clusters, d_cluster_counts, k, dev_input_buffs[buffer_no], 
                     dev_output_buffs[buffer_no], batch_size, stream[buffer_no]);
-
+            cudaStreamSynchronize(stream[buffer_no]);
+            STOP_RECORD_TIMER(batch_ms);
+            cluster_ms += batch_ms;
+            printf("Cluster time %fms\n", batch_ms);
             // Asynchonrous copy cluster assignments from device to host
+            START_TIMER();
             cudaMemcpyAsync(printer_arg->cluster_assignments, dev_output_buffs[buffer_no], 
                     batch_size*sizeof(int), cudaMemcpyDeviceToHost, stream[buffer_no]);
 
+            cudaStreamSynchronize(stream[buffer_no]);
+            STOP_RECORD_TIMER(batch_ms);
+            copy2_ms += batch_ms;
+            printf("Device to host copy time %fms\n", batch_ms);
             // Add callback for printing cluster assignments once done.
             //cudaStreamAddCallback(stream[buffer_no], printerCallback, (void*)printer_arg, 0);
 
@@ -204,9 +222,8 @@ void cluster(int k, int batch_size) {
     gpuErrChk(cudaMemcpy(clusters, d_clusters, k * REVIEW_DIM * sizeof(int),
                              cudaMemcpyDeviceToHost));
 
-    STOP_RECORD_TIMER(total_ms);
-    printf("Total time %fms for %d reviews with throughput %f\n", total_ms, review_idx, review_idx/total_ms);
-
+    //STOP_RECORD_TIMER(total_ms);
+    //printf("Total time %fms for %d reviews with throughput %f\n", total_ms, review_idx, review_idx/total_ms);
     // print cluster summaries
     for (int i=0; i < k; i++) {
         printf("Cluster %d, population %d\n", i, cluster_counts[i]);
@@ -217,6 +234,9 @@ void cluster(int k, int batch_size) {
         printf("]\n\n");
     }
 
+    int total_b = (int) ceil((float)review_idx / batch_size);
+    printf("Batch size: %d\nTotal: %f\nD->H copy: %f\nCluster Kernel: %f\nH->D copy: %f\n",
+         batch_size, (copy1_ms + cluster_ms + copy2_ms) / total_b, copy1_ms/total_b, cluster_ms/total_b, copy2_ms/total_b);
     // free cluster data
     gpuErrChk(cudaFree(d_clusters));
     gpuErrChk(cudaFree(d_cluster_counts));
@@ -238,6 +258,6 @@ void cluster(int k, int batch_size) {
 }
 
 int main() {
-    cluster(50, 2048);
+    cluster(50, 4096);
     return 0;
 }
