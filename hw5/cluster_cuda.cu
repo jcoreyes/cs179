@@ -72,7 +72,6 @@ void sloppyClusterKernel(float *clusters, int *cluster_counts, int k,
     __syncthreads();
     
     while (i < batch_size) {
-        //printf("i is %d and batch size is %d\n", i, batch_size);
         // Initialize min dist to max possible float
         float min_dist = FLT_MAX;
         int closest = 0;
