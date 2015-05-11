@@ -31,16 +31,24 @@ def transformer_iter(cv, lsa, batch_size=1000):
         data = list(islice(iterable, batch_size))
 
 def printer(iterable):
+    start = time.clock()
+    count = 0
     for batch in iterable:
         f = StringIO.StringIO()
         np.savetxt(f, batch, delimiter=',', fmt='%.6e')
-        print f.getvalue()[:-1]
+        #print f.getvalue()[:-1]
+        count += 1
+        if count > 100:
+            break
+    end = time.clock()
+    total = end - start
+    print("Total time %f ms with throughput %f for %d" %(total, total/count, count)) 
 
 if __name__ == '__main__':
-    with open('review_bow.pkl', 'rb') as f:
+    with open('/srv/cs179_set5_data/review_bow.pkl', 'rb') as f:
         cv = pickle.load(f)
 
-    with open('lsa.pkl', 'rb') as f:
+    with open('/srv/cs179_set5_data/lsa.pkl', 'rb') as f:
         lsa = pickle.load(f)
 
     printer(transformer_iter(cv, lsa))
