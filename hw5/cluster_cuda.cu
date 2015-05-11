@@ -64,11 +64,13 @@ void sloppyClusterKernel(float *clusters, int *cluster_counts, int k,
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     extern __shared__ float cluster_data[];
     // Load cluster centers into shared memory
+    
     while (tid < k*REVIEW_DIM) {
         cluster_data[tid] = clusters[tid];
         tid += blockDim.x;
     }
     __syncthreads();
+    
     while (i < batch_size) {
         //printf("i is %d and batch size is %d\n", i, batch_size);
         // Initialize min dist to max possible float
